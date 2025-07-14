@@ -1,13 +1,28 @@
 body {
   font-family: sans-serif;
-  background: #f0f0f0;
+  background: #eee;
   text-align: center;
+  margin: 0;
   padding: 20px;
 }
 
 canvas {
   border: 2px solid #333;
-  background-color: #fff;
-  margin-top: 20px;
-  cursor: crosshair;
+  background: white;
+  margin-top: 10px;
+  cursor: pointer;
+}
+
+#controls {
+  margin-bottom: 10px;
+}
+
+#trash {
+  display: inline-block;
+  font-size: 24px;
+  margin-left: 20px;
+  background: #fdd;
+  padding: 5px 10px;
+  border: 2px solid #900;
+  border-radius: 6px;
 }
