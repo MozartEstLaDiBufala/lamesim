@@ -2,15 +2,16 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>HacheSim</title>
+  <title>Simulateur de forces - Hache</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <h1>🪓 HacheSim V1</h1>
-  <p>Clique sur la lame pour frapper !</p>
-  <canvas id="canvas" width="600" height="400"></canvas>
-
+  <h1>🪓 HacheSim – Forces appliquées</h1>
+  <div id="controls">
+    <button id="addForce">➕ Ajouter une force</button>
+    <div id="trash">🗑️</div>
+  </div>
+  <canvas id="canvas" width="800" height="500"></canvas>
   <script src="script.js"></script>
 </body>
 </html>
