@@ -1,67 +1,95 @@
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 
-// Données principales
 let arrows = [];
-let points = [  // points partagés par tous les triangles
-  { x: 300, y: 200 },
-  { x: 400, y: 250 },
-  { x: 300, y: 300 },
-];
-let triangles = [
-  [0, 1, 2], // indices dans points
-];
+let points = [];
+let lines = [];
+let forceShapes = [];
 
-// États de drag & mode
+let draggingPointIndex = null;
+let draggingArrow = null;
+let draggingArrowPoint = null;
+let draggingShape = null;
+
 let mode = "simulation";
+let subMode = null;
+let mouseX = 0;
+let mouseY = 0;
 
-let draggingPoint = null;        // { pointIndex, triangleIndex, start/end ? } ou null
-let draggingArrowPoint = null;   // { arrow, "start"/"end" }
-let draggingArrow = null;        // { arrow, offsetX, offsetY }
-let draggingTriangle = null;     // index du triangle déplacé
-let draggingTriangleOffset = null; // { dx, dy }
-let hoverFusionTarget = null;    // index point proche pour fusion
+let tempLine = null;
+let traceStartIndex = null;
 
-// Undo/Redo
 let history = [];
 let future = [];
+
+// --- Nouveaux états pour survol en gomme ---
+let hoverPointIndex = null;
+let hoverLineIndex = null;
+let hoverArrowIndex = null;
+let hoverOnShape = false;
 
 function saveState() {
   history.push({
     arrows: JSON.parse(JSON.stringify(arrows)),
     points: JSON.parse(JSON.stringify(points)),
-    triangles: JSON.parse(JSON.stringify(triangles)),
+    lines: JSON.parse(JSON.stringify(lines)),
+    mode,
+    subMode
   });
   if (history.length > 100) history.shift();
   future = [];
 }
 
 function undo() {
-  if (history.length === 0) return;
-  future.push({
-    arrows: JSON.parse(JSON.stringify(arrows)),
-    points: JSON.parse(JSON.stringify(points)),
-    triangles: JSON.parse(JSON.stringify(triangles)),
-  });
-  const prev = history.pop();
-  arrows = prev.arrows;
-  points = prev.points;
-  triangles = prev.triangles;
-  redraw();
+  if (history.length > 0) {
+    future.push({
+      arrows: JSON.parse(JSON.stringify(arrows)),
+      points: JSON.parse(JSON.stringify(points)),
+      lines: JSON.parse(JSON.stringify(lines)),
+      mode,
+      subMode
+    });
+    const prev = history.pop();
+
+    arrows.length = 0;
+    points.length = 0;
+    lines.length = 0;
+
+    prev.arrows.forEach(a => arrows.push(a));
+    prev.points.forEach(p => points.push(p));
+    prev.lines.forEach(l => lines.push(l));
+
+    mode = prev.mode;
+    subMode = prev.subMode;
+
+    redraw();
+  }
 }
 
 function redo() {
-  if (future.length === 0) return;
-  history.push({
-    arrows: JSON.parse(JSON.stringify(arrows)),
-    points: JSON.parse(JSON.stringify(points)),
-    triangles: JSON.parse(JSON.stringify(triangles)),
-  });
-  const next = future.pop();
-  arrows = next.arrows;
-  points = next.points;
-  triangles = next.triangles;
-  redraw();
+  if (future.length > 0) {
+    history.push({
+      arrows: JSON.parse(JSON.stringify(arrows)),
+      points: JSON.parse(JSON.stringify(points)),
+      lines: JSON.parse(JSON.stringify(lines)),
+      mode,
+      subMode
+    });
+    const next = future.pop();
+
+    arrows.length = 0;
+    points.length = 0;
+    lines.length = 0;
+
+    next.arrows.forEach(a => arrows.push(a));
+    next.points.forEach(p => points.push(p));
+    next.lines.forEach(l => lines.push(l));
+
+    mode = next.mode;
+    subMode = next.subMode;
+
+    redraw();
+  }
 }
 
 function resizeCanvas() {
@@ -72,61 +100,117 @@ function resizeCanvas() {
 window.addEventListener("resize", resizeCanvas);
 resizeCanvas();
 
-// Utils
-function distance(x1, y1, x2, y2) {
-  return Math.hypot(x2 - x1, y2 - y1);
-}
-function pointNearLine(px, py, startX, startY, endX, endY) {
-  // distance point-segment
-  const A = { x: startX, y: startY };
-  const B = { x: endX, y: endY };
-  const ABx = B.x - A.x;
-  const ABy = B.y - A.y;
-  const APx = px - A.x;
-  const APy = py - A.y;
-  const ab2 = ABx * ABx + ABy * ABy;
-  const ap_ab = APx * ABx + APy * ABy;
-  const t = Math.max(0, Math.min(1, ap_ab / ab2));
-  const closestX = A.x + t * ABx;
-  const closestY = A.y + t * ABy;
-  return Math.hypot(px - closestX, py - closestY);
-}
-function pointInTrash(x, y) {
-  const trashX = canvas.width * 0.8;
-  return x > trashX;
-}
+function drawFormes() {
+  const adjacency = {};
+  for (let i = 0; i < points.length; i++) adjacency[i] = [];
+  for (let [a, b] of lines) {
+    adjacency[a].push(b);
+    adjacency[b].push(a);
+  }
 
-// Dessin
-
-function drawTriangles() {
-  triangles.forEach((tri, triIndex) => {
-    ctx.fillStyle = "#999";
-    ctx.beginPath();
-    ctx.moveTo(points[tri[0]].x, points[tri[0]].y);
-    ctx.lineTo(points[tri[1]].x, points[tri[1]].y);
-    ctx.lineTo(points[tri[2]].x, points[tri[2]].y);
-    ctx.closePath();
-    ctx.fill();
-
-    if (mode === "edition") {
-      // points du triangle
-      tri.forEach(pIndex => {
-        let color = "blue";
-        if (draggingPoint && draggingPoint.pointIndex === pIndex) {
-          color = "deepskyblue";
-        } else if (hoverFusionTarget === pIndex) {
-          color = "lightblue";
+  function findCycle(start) {
+    const path = [];
+    const visited = new Set();
+    function dfs(current, prev) {
+      path.push(current);
+      visited.add(current);
+      for (const neighbor of adjacency[current]) {
+        if (neighbor === prev) continue;
+        if (neighbor === start && path.length > 2) return true;
+        if (!visited.has(neighbor)) {
+          if (dfs(neighbor, current)) return true;
         }
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.arc(points[pIndex].x, points[pIndex].y, 8, 0, 2 * Math.PI);
-        ctx.fill();
-      });
+      }
+      path.pop();
+      return false;
     }
-  });
+    return dfs(start, -1) ? path.slice() : null;
+  }
+
+  const drawnCycles = new Set();
+
+  for (let i = 0; i < points.length; i++) {
+    const cycle = findCycle(i);
+    if (cycle) {
+      const key = [...cycle].sort().join("-");
+      if (drawnCycles.has(key)) continue;
+      drawnCycles.add(key);
+
+      // Dessiner polygone gris semi-transparent si survol en gomme
+      ctx.beginPath();
+      const first = points[cycle[0]];
+      ctx.moveTo(first.x, first.y);
+      for (let j = 1; j < cycle.length; j++) {
+        const pt = points[cycle[j]];
+        ctx.lineTo(pt.x, pt.y);
+      }
+      ctx.closePath();
+      if (mode === "edition" && subMode === "gomme" && hoverOnShape) {
+        ctx.fillStyle = "rgba(200,200,200,0.3)";
+      } else {
+        ctx.fillStyle = "#ccc";
+      }
+      ctx.fill();
+    }
+  }
+
+  // Tracer les lignes avec opacité réduite si survol en gomme
+  ctx.strokeStyle = "#999";
+  for (let i = 0; i < lines.length; i++) {
+    const [a, b] = lines[i];
+    const p1 = points[a];
+    const p2 = points[b];
+    ctx.beginPath();
+    ctx.moveTo(p1.x, p1.y);
+    ctx.lineTo(p2.x, p2.y);
+    if (mode === "edition" && subMode === "gomme" && i === hoverLineIndex) {
+      ctx.strokeStyle = "rgba(153,153,153,0.3)";
+    } else {
+      ctx.strokeStyle = "#999";
+    }
+    ctx.stroke();
+  }
+
+  if (tempLine) {
+    const p1 = points[tempLine.start];
+    ctx.beginPath();
+    ctx.moveTo(p1.x, p1.y);
+    ctx.lineTo(mouseX, mouseY);
+    ctx.strokeStyle = "black";
+    ctx.setLineDash([5, 5]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  if (mode === "edition") {
+    points.forEach((p, i) => {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 8, 0, 2 * Math.PI);
+      if (subMode === "gomme" && i === hoverPointIndex) {
+        ctx.fillStyle = "rgba(0,0,255,0.3)";
+      } else {
+        ctx.fillStyle = subMode === "gomme" && p.toDelete ? "orange" : "blue";
+      }
+      ctx.fill();
+    });
+
+    if (subMode === "ajout") {
+      ctx.beginPath();
+      ctx.arc(mouseX, mouseY, 6, 0, 2 * Math.PI);
+      ctx.fillStyle = "#add8e6";
+      ctx.fill();
+    }
+
+    if (subMode === "trace") {
+      ctx.beginPath();
+      ctx.arc(mouseX, mouseY, 5, 0, 2 * Math.PI);
+      ctx.fillStyle = "black";
+      ctx.fill();
+    }
+  }
 }
 
-function drawArrow(arrow) {
+function drawArrow(arrow, index) {
   const { startX, startY, endX, endY } = arrow;
   const dx = endX - startX;
   const dy = endY - startY;
@@ -136,7 +220,10 @@ function drawArrow(arrow) {
   arrow.force = force;
   const arrowWidth = 5 + length / 50;
 
-  ctx.strokeStyle = arrow.isOverTrash ? "#ff8080" : "red";
+  ctx.strokeStyle = "red";
+  if (mode === "edition" && subMode === "gomme" && index === hoverArrowIndex) {
+    ctx.strokeStyle = "rgba(255,0,0,0.3)";
+  }
   ctx.lineWidth = arrowWidth;
   ctx.beginPath();
   ctx.moveTo(startX, startY);
@@ -156,339 +243,501 @@ function drawArrow(arrow) {
     endY - headLength * Math.sin(angle + 0.5)
   );
   ctx.closePath();
-  ctx.fillStyle = arrow.isOverTrash ? "#ff8080" : "red";
+  ctx.fillStyle = "red";
   ctx.fill();
 
   ctx.fillStyle = "black";
   ctx.font = "14px sans-serif";
   ctx.fillText(`${Math.round(force)} N`, startX + dx / 2, startY + dy / 2 - 10);
+
+  if (mode === "edition" && subMode === "deplacement") {
+    ctx.beginPath();
+    ctx.arc(startX, startY, 7, 0, 2 * Math.PI);
+    ctx.fillStyle = "orange";
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(endX, endY, 7, 0, 2 * Math.PI);
+    ctx.fillStyle = "orange";
+    ctx.fill();
+  }
 }
 
 function drawButtons() {
-  // Mode Edition
   ctx.fillStyle = mode === "edition" ? "#007bff" : "#6c757d";
   ctx.fillRect(20, 20, 100, 30);
   ctx.fillStyle = "white";
   ctx.fillText("Édition", 40, 40);
 
-  // Mode Simulation
   ctx.fillStyle = mode === "simulation" ? "#007bff" : "#6c757d";
   ctx.fillRect(130, 20, 110, 30);
   ctx.fillStyle = "white";
   ctx.fillText("Simulation", 150, 40);
 
-  // Ajouter triangle (visible seulement en édition)
   if (mode === "edition") {
-    ctx.fillStyle = "#17a2b8";
-    ctx.fillRect(20, 60, 140, 30);
+    const modes = [
+      { label: "Ajouter Point", value: "ajout" },
+      { label: "Tracer Lien", value: "trace" },
+      { label: "Déplacer", value: "deplacement" },
+      { label: "Gomme", value: "gomme" },
+    ];
+
+    modes.forEach((m, i) => {
+      ctx.fillStyle = subMode === m.value ? "#17a2b8" : "#6c757d";
+      ctx.fillRect(20, 60 + i * 40, 140, 30);
+      ctx.fillStyle = "white";
+      ctx.fillText(m.label, 30, 80 + i * 40);
+    });
+
+    ctx.fillStyle = "#28a745";
+    ctx.fillRect(canvas.width * 0.7, 20, 110, 30);
     ctx.fillStyle = "white";
-    ctx.fillText("Ajouter triangle", 30, 80);
+    ctx.fillText("Ajouter Flèche", canvas.width * 0.7 + 5, 40);
+    const shapeX = canvas.width * 0.7;
+    const baseY = 60;
+    const shapeSize = 30;
+    const spacing = 40;
+
+    ["circle", "rectangle", "triangle"].forEach((type, i) => {
+      ctx.fillStyle = "#28a745";
+      ctx.beginPath();
+      const x = shapeX + shapeSize / 2;
+      const y = baseY + i * spacing + shapeSize / 2;
+
+      if (type === "circle") {
+        ctx.arc(x, y, 10, 0, 2 * Math.PI);
+        ctx.fill();
+      } else if (type === "rectangle") {
+        ctx.fillRect(shapeX, baseY + i * spacing, shapeSize, shapeSize);
+      } else if (type === "triangle") {
+        ctx.beginPath();
+        ctx.moveTo(x, y - 10);
+        ctx.lineTo(x - 10, y + 10);
+        ctx.lineTo(x + 10, y + 10);
+        ctx.closePath();
+        ctx.fill();
+      }
+    });
+
+    ctx.fillStyle = "black";
+    ctx.fillText(`(${arrows.length})`, canvas.width * 0.7 + 120, 40);
   }
 
-  // Ajouter flèche (toujours visible)
-  ctx.fillStyle = "#28a745";
-  ctx.fillRect(canvas.width * 0.7, 20, 110, 30);
-  ctx.fillStyle = "white";
-  ctx.font = "16px sans-serif";
-  ctx.fillText("Ajouter Fleche", canvas.width * 0.7 + 10, 40);
-  ctx.fillStyle = "black";
-  ctx.fillText(`(${arrows.length})`, canvas.width * 0.7 + 120, 40);
-
-  // Undo
   ctx.fillStyle = "#ffc107";
   ctx.fillRect(canvas.width / 2 - 60, 20, 50, 30);
   ctx.fillStyle = "black";
   ctx.fillText("↺", canvas.width / 2 - 45, 42);
 
-  // Redo
   ctx.fillStyle = "#ffc107";
   ctx.fillRect(canvas.width / 2 + 10, 20, 50, 30);
   ctx.fillStyle = "black";
   ctx.fillText("↻", canvas.width / 2 + 25, 42);
-
-  // Poubelle
-  const trashX = canvas.width * 0.8;
-  const trashWidth = canvas.width * 0.2;
-  ctx.globalAlpha = 0.5;
-  ctx.fillStyle = "#dc3545";
-  ctx.fillRect(trashX, 0, trashWidth, canvas.height);
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = "white";
-  ctx.fillText("🗑️ Poubelle", trashX + 10, 40);
 }
 
 function redraw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  drawTriangles();
+  drawFormes();
   arrows.forEach(drawArrow);
   drawButtons();
 }
 
-// Gestion événements
+canvas.addEventListener("mousemove", (e) => {
+  const rect = canvas.getBoundingClientRect();
+  mouseX = e.clientX - rect.left;
+  mouseY = e.clientY - rect.top;
 
-canvas.addEventListener("mousedown", e => {
+  // Gestion du déplacement de la forme complète
+  if (draggingShape) {
+    if (typeof draggingShape === "object") {
+      const dx = mouseX - draggingShape.prevX;
+      const dy = mouseY - draggingShape.prevY;
+      moveShape(dx, dy);
+      draggingShape.prevX = mouseX;
+      draggingShape.prevY = mouseY;
+    } else if (draggingShape === true) {
+      draggingShape = { prevX: mouseX, prevY: mouseY };
+    }
+    redraw();
+    return;  // On arrête ici car priorité au drag forme
+  }
+
+  // Réinitialiser hover (pour gomme)
+  hoverPointIndex = null;
+  hoverLineIndex = null;
+  hoverArrowIndex = null;
+  hoverOnShape = false;
+
+  if (mode === "edition") {
+    if (subMode === "gomme") {
+      // Survol point ?
+      for (let i = 0; i < points.length; i++) {
+        if (Math.hypot(mouseX - points[i].x, mouseY - points[i].y) < 10) {
+          hoverPointIndex = i;
+          break;
+        }
+      }
+      // Survol ligne ?
+      if (hoverPointIndex === null) {
+        for (let i = 0; i < lines.length; i++) {
+          const [a, b] = lines[i];
+          const p1 = points[a];
+          const p2 = points[b];
+          if (pointLineDistance(mouseX, mouseY, p1.x, p1.y, p2.x, p2.y) < 8) {
+            hoverLineIndex = i;
+            break;
+          }
+        }
+      }
+      // Survol flèche ?
+      if (hoverPointIndex === null && hoverLineIndex === null) {
+        for (let i = 0; i < arrows.length; i++) {
+          const arr = arrows[i];
+          if (
+            Math.hypot(mouseX - arr.startX, mouseY - arr.startY) < 10 ||
+            Math.hypot(mouseX - arr.endX, mouseY - arr.endY) < 10
+          ) {
+            hoverArrowIndex = i;
+            break;
+          }
+          // corps flèche
+          if (pointLineDistance(mouseX, mouseY, arr.startX, arr.startY, arr.endX, arr.endY) < 10) {
+            hoverArrowIndex = i;
+            break;
+          }
+        }
+      }
+      // Survol forme grise ? (polygone)
+      if (hoverPointIndex === null && hoverLineIndex === null && hoverArrowIndex === null) {
+        const adjacency = {};
+        for (let i = 0; i < points.length; i++) adjacency[i] = [];
+        for (let [a, b] of lines) {
+          adjacency[a].push(b);
+          adjacency[b].push(a);
+        }
+        function findCycle(start) {
+          const path = [];
+          const visited = new Set();
+          function dfs(current, prev) {
+            path.push(current);
+            visited.add(current);
+            for (const neighbor of adjacency[current]) {
+              if (neighbor === prev) continue;
+              if (neighbor === start && path.length > 2) return true;
+              if (!visited.has(neighbor)) {
+                if (dfs(neighbor, current)) return true;
+              }
+            }
+            path.pop();
+            return false;
+          }
+          return dfs(start, -1) ? path.slice() : null;
+        }
+        for (let i = 0; i < points.length; i++) {
+          const cycle = findCycle(i);
+          if (cycle) {
+            ctx.beginPath();
+            const first = points[cycle[0]];
+            ctx.moveTo(first.x, first.y);
+            for (let j = 1; j < cycle.length; j++) {
+              const pt = points[cycle[j]];
+              ctx.lineTo(pt.x, pt.y);
+            }
+            ctx.closePath();
+            if (ctx.isPointInPath(mouseX, mouseY)) {
+              hoverOnShape = true;
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (mode === "edition" && subMode === "deplacement") {
+    if (draggingPointIndex !== null) {
+      points[draggingPointIndex].x = mouseX;
+      points[draggingPointIndex].y = mouseY;
+      redraw();
+      return;
+    }
+    if (draggingArrowPoint !== null) {
+      const arr = arrows[draggingArrow];
+      if (draggingArrowPoint === "start") {
+        arr.startX = mouseX;
+        arr.startY = mouseY;
+      } else if (draggingArrowPoint === "end") {
+        arr.endX = mouseX;
+        arr.endY = mouseY;
+      }
+      redraw();
+      return;
+    }
+    if (draggingArrow !== null) {
+      const arr = arrows[draggingArrow];
+      const dx = mouseX - arr._dragPrevX;
+      const dy = mouseY - arr._dragPrevY;
+      arr.startX += dx;
+      arr.startY += dy;
+      arr.endX += dx;
+      arr.endY += dy;
+      arr._dragPrevX = mouseX;
+      arr._dragPrevY = mouseY;
+      redraw();
+      return;
+    }
+  }
+
+  redraw();
+});
+
+canvas.addEventListener("mousedown", (e) => {
   const rect = canvas.getBoundingClientRect();
   const mx = e.clientX - rect.left;
   const my = e.clientY - rect.top;
+  console.log("mousedown at", mx, my);
 
-  // Boutons mode Edition / Simulation
+  // Undo
+  const undoX = canvas.width / 2 - 60;
+  const redoX = canvas.width / 2 + 10;
+
+  if (mx >= undoX && mx <= undoX + 50 && my >= 20 && my <= 50) {
+    console.log("Undo clicked");
+    undo();
+    return;
+  }
+  if (mx >= redoX && mx <= redoX + 50 && my >= 20 && my <= 50) {
+    console.log("Redo clicked");
+    redo();
+    return;
+  }
+
   if (mx >= 20 && mx <= 120 && my >= 20 && my <= 50) {
     mode = "edition";
+    subMode = null;
+    tempLine = null;
+    traceStartIndex = null;
     redraw();
     return;
   }
   if (mx >= 130 && mx <= 240 && my >= 20 && my <= 50) {
     mode = "simulation";
-    redraw();
-    return;
-  }
-
-  // Undo/Redo
-  const undoX = canvas.width / 2 - 60;
-  const redoX = canvas.width / 2 + 10;
-  if (mx >= undoX && mx <= undoX + 50 && my >= 20 && my <= 50) {
-    undo();
-    return;
-  }
-  if (mx >= redoX && mx <= redoX + 50 && my >= 20 && my <= 50) {
-    redo();
-    return;
-  }
-
-  // Ajouter triangle (mode edition)
-  if (mode === "edition" && mx >= 20 && mx <= 160 && my >= 60 && my <= 90) {
-    saveState();
-    // Ajoute un triangle avec 3 nouveaux points (décalés pour pas chevaucher)
-    const baseX = 350;
-    const baseY = 250;
-    const n = points.length;
-    points.push({ x: baseX, y: baseY });
-    points.push({ x: baseX + 50, y: baseY + 20 });
-    points.push({ x: baseX, y: baseY + 50 });
-    triangles.push([n, n+1, n+2]);
-    redraw();
-    return;
-  }
-
-  // Ajouter flèche (toujours visible)
-  if (mx >= canvas.width * 0.7 && mx <= canvas.width * 0.7 + 110 && my >= 20 && my <= 50) {
-    saveState();
-    arrows.push({
-      startX: 350,
-      startY: 250,
-      endX: 400,
-      endY: 250,
-      force: 0,
-      isOverTrash: false,
-    });
+    subMode = null;
+    tempLine = null;
+    traceStartIndex = null;
     redraw();
     return;
   }
 
   if (mode === "edition") {
-    // Cherche point proche pour drag
-    for (let triIndex=0; triIndex < triangles.length; triIndex++) {
-      for (let i=0; i<3; i++) {
-        const pIndex = triangles[triIndex][i];
-        const p = points[pIndex];
-        if (distance(mx, my, p.x, p.y) < 8) {
+    const buttonHeight = 30;
+    const buttonSpacing = 40;
+    const buttonStartY = 60;
+    const modes = ["ajout", "trace", "deplacement", "gomme"];
+    for (let i = 0; i < modes.length; i++) {
+      if (mx >= 20 && mx <= 160 && my >= buttonStartY + i * buttonSpacing && my <= buttonStartY + i * buttonSpacing + buttonHeight) {
+        subMode = modes[i];
+        tempLine = null;
+        traceStartIndex = null;
+        redraw();
+        return;
+      }
+    }
+
+    if (mx >= canvas.width * 0.7 && mx <= canvas.width * 0.7 + 110 && my >= 20 && my <= 50) {
+      const shapeX = canvas.width * 0.7;
+      const shapeSize = 30;
+      const baseY = 60;
+      ["circle", "rectangle", "triangle"].forEach((type, i) => {
+        const sy = baseY + i * 40;
+        if (mx >= shapeX && mx <= shapeX + shapeSize && my >= sy && my <= sy + shapeSize) {
           saveState();
-          draggingPoint = { pointIndex: pIndex, triIndex, vertexIndex: i };
+          forceShapes.push({ type, x: 200 + i * 40, y: 200, size: 30 });
+          redraw();
+          return;
+        }
+      });
+      saveState();
+      arrows.push({ startX: 1000, startY: 100, endX: 1020, endY: 130 });
+      redraw();
+      return;
+    }
+
+    if (subMode === "ajout") {
+      saveState();
+      points.push({ x: mx, y: my });
+      redraw();
+      return;
+    }
+    if (subMode === "trace") {
+      // Recherche point proche
+      let closePointIndex = null;
+      for (let i = 0; i < points.length; i++) {
+        if (Math.hypot(points[i].x - mx, points[i].y - my) < 15) {
+          closePointIndex = i;
+          break;
+        }
+      }
+      if (closePointIndex !== null) {
+        if (traceStartIndex === null) {
+          traceStartIndex = closePointIndex;
+          tempLine = { start: closePointIndex };
+          redraw();
+          return;
+        } else if (traceStartIndex !== closePointIndex) {
+          saveState();
+          lines.push([traceStartIndex, closePointIndex]);
+          tempLine = null;
+          traceStartIndex = null;
+          redraw();
           return;
         }
       }
     }
-    // Sinon, cherche si clic dans un triangle pour drag entier
-    for (let triIndex=0; triIndex < triangles.length; triIndex++) {
-      const tri = triangles[triIndex];
-      if (pointInTriangle({x: mx, y: my}, tri)) {
-        saveState();
-        draggingTriangle = triIndex;
-        draggingTriangleOffset = { dx: mx, dy: my };
-        return;
-      }
-    }
-  } else if (mode === "simulation") {
-    // Flèche : extrémités ou corps
-    for (const arrow of arrows) {
-      if (distance(mx, my, arrow.startX, arrow.startY) < 10) {
-        saveState();
-        draggingArrowPoint = { arrow, point: "start" };
-        return;
-      }
-      if (distance(mx, my, arrow.endX, arrow.endY) < 10) {
-        saveState();
-        draggingArrowPoint = { arrow, point: "end" };
-        return;
-      }
-      if (pointNearLine(mx, my, arrow.startX, arrow.startY, arrow.endX, arrow.endY)) {
-        saveState();
-        draggingArrow = { arrow, offsetX: mx - arrow.startX, offsetY: my - arrow.startY };
-        return;
-      }
-    }
-  }
-});
 
-canvas.addEventListener("mousemove", e => {
-  const rect = canvas.getBoundingClientRect();
-  const mx = e.clientX - rect.left;
-  const my = e.clientY - rect.top;
-
-  if (mode === "edition") {
-    if (draggingPoint) {
-      // Drag d'un point
-      points[draggingPoint.pointIndex].x = mx;
-      points[draggingPoint.pointIndex].y = my;
-
-      // Cherche fusion avec autre point proche (différent)
-      hoverFusionTarget = null;
+    if (subMode === "deplacement") {
+      // Détecter point proche
       for (let i = 0; i < points.length; i++) {
-        if (i !== draggingPoint.pointIndex && distance(mx, my, points[i].x, points[i].y) < 15) {
-          hoverFusionTarget = i;
-          break;
+        if (Math.hypot(points[i].x - mx, points[i].y - my) < 10) {
+          draggingPointIndex = i;
+          saveState();
+          return;
         }
       }
-      redraw();
-      return;
-    }
-    if (draggingTriangle !== null) {
-      // Drag entier triangle
-      const tri = triangles[draggingTriangle];
-      const dx = mx - draggingTriangleOffset.dx;
-      const dy = my - draggingTriangleOffset.dy;
-      tri.forEach(pIndex => {
-        points[pIndex].x += dx;
-        points[pIndex].y += dy;
-      });
-      draggingTriangleOffset = { dx: mx, dy: my };
-      redraw();
-      return;
-    }
-  } else if (mode === "simulation") {
-    if (draggingArrowPoint) {
-      draggingArrowPoint.arrow[draggingArrowPoint.point + "X"] = mx;
-      draggingArrowPoint.arrow[draggingArrowPoint.point + "Y"] = my;
-      redraw();
-      return;
-    }
-    if (draggingArrow) {
-      const arrow = draggingArrow.arrow;
-      const dx = mx - arrow.startX - draggingArrow.offsetX;
-      const dy = my - arrow.startY - draggingArrow.offsetY;
-      arrow.startX += dx;
-      arrow.startY += dy;
-      arrow.endX += dx;
-      arrow.endY += dy;
-
-      const trashX = canvas.width * 0.8;
-      arrow.isOverTrash = arrow.startX > trashX || arrow.endX > trashX;
-      redraw();
-      return;
-    }
-  }
-});
-
-canvas.addEventListener("mouseup", e => {
-  if (mode === "edition") {
-    if (draggingPoint) {
-      if (hoverFusionTarget !== null) {
-        // Fusion des points
-        saveState();
-        const idxToKeep = hoverFusionTarget;
-        const idxToRemove = draggingPoint.pointIndex;
-
-        // Remplace toutes occurrences idxToRemove par idxToKeep dans triangles
-        triangles.forEach(tri => {
-          for(let i=0; i<3; i++) {
-            if(tri[i] === idxToRemove) tri[i] = idxToKeep;
-          }
-        });
-
-        // Supprime le point idxToRemove
-        points.splice(idxToRemove,1);
-
-        // Ajuste indices dans triangles (car un point a disparu)
-        triangles.forEach(tri => {
-          for(let i=0; i<3; i++) {
-            if(tri[i] > idxToRemove) tri[i]--;
-          }
-        });
+      // Détecter flèche
+      for (let i = 0; i < arrows.length; i++) {
+        const arr = arrows[i];
+        if (Math.hypot(arr.startX - mx, arr.startY - my) < 10) {
+          draggingArrow = i;
+          draggingArrowPoint = "start";
+          arr._dragPrevX = mx;
+          arr._dragPrevY = my;
+          saveState();
+          return;
+        }
+        if (Math.hypot(arr.endX - mx, arr.endY - my) < 10) {
+          draggingArrow = i;
+          draggingArrowPoint = "end";
+          arr._dragPrevX = mx;
+          arr._dragPrevY = my;
+          saveState();
+          return;
+        }
       }
-
-      draggingPoint = null;
-      hoverFusionTarget = null;
-      redraw();
-      return;
-    }
-    if (draggingTriangle !== null) {
-      // Suppression des points dans poubelle si déplacés
+      // Déplacer flèche complète
+      for (let i = 0; i < arrows.length; i++) {
+        const arr = arrows[i];
+        if (pointLineDistance(mx, my, arr.startX, arr.startY, arr.endX, arr.endY) < 10) {
+          draggingArrow = i;
+          draggingArrowPoint = null;
+          arr._dragPrevX = mx;
+          arr._dragPrevY = my;
+          saveState();
+          return;
+        }
+      }
+      // Déplacer forme complète
+      draggingShape = true;
       saveState();
-      const tri = triangles[draggingTriangle];
-      const pointsToRemove = new Set();
+      return;
+    }
 
-      tri.forEach(pIndex => {
-        if(pointInTrash(points[pIndex].x, points[pIndex].y)) {
-          pointsToRemove.add(pIndex);
+    if (subMode === "gomme") {
+      // Supprimer point survolé
+      for (let i = 0; i < points.length; i++) {
+        if (Math.hypot(points[i].x - mx, points[i].y - my) < 10) {
+          saveState();
+          points.splice(i, 1);
+          // Supprimer lignes liées
+          lines = lines.filter(l => l[0] !== i && l[1] !== i);
+          // Recalibrer indices des lignes
+          lines = lines.map(([a, b]) => [
+            a > i ? a - 1 : a,
+            b > i ? b - 1 : b
+          ]);
+          redraw();
+          return;
         }
-      });
-
-      if(pointsToRemove.size > 0) {
-        // Supprime triangles qui utilisent ces points
-        triangles = triangles.filter(tri => !tri.some(idx => pointsToRemove.has(idx)));
-
-        // Supprime points (du plus grand indice au plus petit)
-        const sortedIndices = Array.from(pointsToRemove).sort((a,b)=>b-a);
-        sortedIndices.forEach(idx => {
-          points.splice(idx,1);
-          // Ajuste indices dans triangles
-          triangles.forEach(tri => {
-            for(let i=0; i<3; i++) {
-              if(tri[i] > idx) tri[i]--;
-            }
-          });
-        });
       }
-
-      draggingTriangle = null;
-      draggingTriangleOffset = null;
-      redraw();
-      return;
-    }
-  }
-
-  if (mode === "simulation") {
-    if (draggingArrowPoint) {
-      draggingArrowPoint = null;
-      redraw();
-      return;
-    }
-    if (draggingArrow) {
-      const arrow = draggingArrow.arrow;
-      if(arrow.isOverTrash) {
-        saveState();
-        arrows = arrows.filter(a => a !== arrow);
+      // Supprimer ligne survolée
+      for (let i = 0; i < lines.length; i++) {
+        const [a, b] = lines[i];
+        const p1 = points[a];
+        const p2 = points[b];
+        if (pointLineDistance(mx, my, p1.x, p1.y, p2.x, p2.y) < 8) {
+          saveState();
+          lines.splice(i, 1);
+          redraw();
+          return;
+        }
       }
-      draggingArrow = null;
-      redraw();
-      return;
+      // Supprimer flèche survolée
+      for (let i = 0; i < arrows.length; i++) {
+        const arr = arrows[i];
+        if (
+          Math.hypot(arr.startX - mx, arr.startY - my) < 10 ||
+          Math.hypot(arr.endX - mx, arr.endY - my) < 10 ||
+          pointLineDistance(mx, my, arr.startX, arr.startY, arr.endX, arr.endY) < 10
+        ) {
+          saveState();
+          arrows.splice(i, 1);
+          redraw();
+          return;
+        }
+      }
     }
   }
 });
 
-// Fonction pour détecter si point est dans un triangle (utile pour drag triangle)
-function pointInTriangle(p, tri) {
-  const A = points[tri[0]];
-  const B = points[tri[1]];
-  const C = points[tri[2]];
-  const areaOrig = triangleArea(A, B, C);
-  const area1 = triangleArea(p, B, C);
-  const area2 = triangleArea(A, p, C);
-  const area3 = triangleArea(A, B, p);
-  return Math.abs(areaOrig - (area1 + area2 + area3)) < 0.1;
-}
-function triangleArea(A, B, C) {
-  return Math.abs((A.x*(B.y-C.y) + B.x*(C.y-A.y) + C.x*(A.y-B.y))/2);
+canvas.addEventListener("mouseup", (e) => {
+  draggingPointIndex = null;
+  draggingArrow = null;
+  draggingArrowPoint = null;
+  draggingShape = null;
+
+});
+
+function pointLineDistance(px, py, x1, y1, x2, y2) {
+  const A = px - x1;
+  const B = py - y1;
+  const C = x2 - x1;
+  const D = y2 - y1;
+
+  const dot = A * C + B * D;
+  const len_sq = C * C + D * D;
+  let param = -1;
+  if (len_sq !== 0) param = dot / len_sq;
+
+  let xx, yy;
+
+  if (param < 0) {
+    xx = x1;
+    yy = y1;
+  } else if (param > 1) {
+    xx = x2;
+    yy = y2;
+  } else {
+    xx = x1 + param * C;
+    yy = y1 + param * D;
+  }
+
+  const dx = px - xx;
+  const dy = py - yy;
+  return Math.sqrt(dx * dx + dy * dy);
 }
 
+function moveShape(dx, dy) {
+  points.forEach(p => {
+    p.x += dx;
+    p.y += dy;
+  });
+  arrows.forEach(arr => {
+    arr.startX += dx;
+    arr.startY += dy;
+    arr.endX += dx;
+    arr.endY += dy;
+  });
+  redraw();
+}
+
+// Initial state save
+saveState();
 redraw();
