@@ -4,14 +4,16 @@ const ctx = canvas.getContext("2d"); // ctx est le contexte de dessin du canvas,
 let arrows = []; //let signifie que la variable peut être modifiée, contrairement à const qui est une constante
 let lamePoints = [];
 let lameLines = [];
-
 let forcePoints = [];
 let forceLines = [];
 
-let draggingPointIndex = null;
-let draggingArrow = null;
-let draggingArrowPoint = null;
-let draggingShape = null;
+let draggingPointIndexlame = null;
+let draggingShapelame = null;
+let draggingPointIndexforce = null;
+let draggingShapeforce = null;
+//let draggingArrow = null;
+//let draggingArrowPoint = null;
+
 
 let mode = "simulation";
 let subMode = null;
@@ -27,10 +29,14 @@ let forceTraceStartIndex = null; // pour le point de départ du traçage
 let history = [];
 let future = [];
 
-let hoverPointIndex = null; // nouveaux états pour survol en gomme
-let hoverLineIndex = null;
-let hoverArrowIndex = null;
-let hoverOnShape = false;
+let hoverPointIndexlame = null; // nouveaux états pour survol en gomme
+let hoverLineIndexlame = null;
+let hoverOnShapelame = false;
+
+let hoverPointIndexforce = null; // nouveaux états pour survol en gomme
+let hoverLineIndexforce = null;
+let hoverOnShapeforce = false;
+//let hoverArrowIndex = null;
 
 function saveState() { //fonction pour sauvegarder l'état actuel du dessin
   // On utilise JSON.parse(JSON.stringify(...)) pour faire une copie profonde des tableaux
@@ -42,9 +48,11 @@ function saveState() { //fonction pour sauvegarder l'état actuel du dessin
   // En utilisant cette méthode, on s'assure que chaque état sauvegardé est indépendant
   // et peut être restauré sans interférer avec les modifications futures.
     history.push({
-    arrows: JSON.parse(JSON.stringify(arrows)),
+    //arrows: JSON.parse(JSON.stringify(arrows)),
     lamePoints: JSON.parse(JSON.stringify(lamePoints)),
     lameLines: JSON.parse(JSON.stringify(lameLines)),
+    forcePoints: JSON.parse(JSON.stringify(forcePoints)),
+    forceLines: JSON.parse(JSON.stringify(forceLines)),
     mode, //edition ou simulation
     subMode // le sous-mode d'édition (pointLame,lienLame,pointForce,lienForce, déplacement, gomme)
   });
@@ -55,23 +63,28 @@ function saveState() { //fonction pour sauvegarder l'état actuel du dessin
 function undo() {
   if (history.length > 0) { // Vérifie s'il y a des états précédents à restaurer
     future.push({
-      arrows: JSON.parse(JSON.stringify(arrows)),
+      //arrows: JSON.parse(JSON.stringify(arrows)),
       lamePoints: JSON.parse(JSON.stringify(lamePoints)),
       lameLines: JSON.parse(JSON.stringify(lameLines)),
+      forcePoints: JSON.parse(JSON.stringify(forcePoints)),
+      forceLines: JSON.parse(JSON.stringify(forceLines)),
       mode,
       subMode
     });
     //si on a un historique, on le restaure
     const prev = history.pop();
 
-    arrows.length = 0;
+    //arrows.length = 0;
     lamePoints.length = 0;
     lameLines.length = 0;
+    forcePoints.length = 0;
+    forceLines.length = 0;
 
-    prev.arrows.forEach(a => arrows.push(a));
+    //prev.arrows.forEach(a => arrows.push(a));
     prev.lamePoints.forEach(p => lamePoints.push(p));
     prev.lameLines.forEach(l => lameLines.push(l));
-
+    prev.forcePoints.forEach(p => forcePoints.push(p));
+    prev.forceLines.forEach(l => forceLines.push(l));
     mode = prev.mode;
     subMode = prev.subMode;
 
@@ -82,21 +95,27 @@ function undo() {
 function redo() {// la meme chose que undo mais dans l'autre sens
   if (future.length > 0) {
     history.push({
-      arrows: JSON.parse(JSON.stringify(arrows)),
+      //arrows: JSON.parse(JSON.stringify(arrows)),
       lamePoints: JSON.parse(JSON.stringify(lamePoints)),
       lameLines: JSON.parse(JSON.stringify(lameLines)),
+      forcePoints: JSON.parse(JSON.stringify(forcePoints)),
+      forceLines: JSON.parse(JSON.stringify(forceLines)),
       mode,
       subMode
     });
     const next = future.pop();
 
-    arrows.length = 0;
+    //arrows.length = 0;
     lamePoints.length = 0;
     lameLines.length = 0;
+    forcePoints.length = 0;
+    forceLines.length = 0;
 
-    next.arrows.forEach(a => arrows.push(a));
+    //next.arrows.forEach(a => arrows.push(a));
     next.lamePoints.forEach(p => lamePoints.push(p));
     next.lameLines.forEach(l => lameLines.push(l));
+    next.forcePoints.forEach(p => forcePoints.push(p));
+    next.forceLines.forEach(l => forceLines.push(l));
 
     mode = next.mode;
     subMode = next.subMode;
@@ -117,7 +136,7 @@ function drawLameFormes() {
   const adjacency = {};// Crée un objet pour stocker les connexions entre les lamePoints
   for (let i = 0; i < lamePoints.length; i++) adjacency[i] = [];// Initialise un tableau pour chaque point
   for (let [a, b] of lameLines) {// Pour chaque ligne, on ajoute les lamePoints aux connexions
-    adjacency[a].push(b);
+    adjacency[a].push(b); //la fonction push ajoute un élément à la fin du tableau
     adjacency[b].push(a);
   }
 
@@ -158,7 +177,7 @@ function drawLameFormes() {
         ctx.lineTo(pt.x, pt.y);
       }
       ctx.closePath();
-      if (mode === "edition" && subMode === "gomme" && hoverOnShape) {
+      if (mode === "edition" && subMode === "gomme" && hoverOnShapelame) {
         ctx.fillStyle = "rgba(200,200,200,0.3)";
       } else {
         ctx.fillStyle = "#ccc";
@@ -176,7 +195,7 @@ function drawLameFormes() {
     ctx.beginPath();
     ctx.moveTo(p1.x, p1.y);
     ctx.lineTo(p2.x, p2.y);
-    if (mode === "edition" && subMode === "gomme" && i === hoverLineIndex) {
+    if (mode === "edition" && subMode === "gomme" && i === hoverLineIndexlame) {
       ctx.strokeStyle = "rgba(153,153,153,0.3)";
     } else {
       ctx.strokeStyle = "#999";
@@ -196,11 +215,12 @@ function drawLameFormes() {
   }
 
   if (mode === "edition") {
+    
     lamePoints.forEach((p, i) => {
       ctx.beginPath();
       ctx.arc(p.x, p.y, 8, 0, 2 * Math.PI);
-      if (subMode === "gomme" && i === hoverPointIndex) {
-        ctx.fillStyle = "rgba(0,0,255,0.3)";
+      if (subMode === "gomme" && i === hoverPointIndexlame) {
+        ctx.fillStyle = "rgba(0, 0, 255, 0.24)";
       } else {
         ctx.fillStyle = subMode === "gomme" && p.toDelete ? "orange" : "blue";
       }
@@ -268,13 +288,25 @@ function drawForceFormes() {
         ctx.lineTo(pt.x, pt.y);
       }
       ctx.closePath();
-      if (mode === "edition" && subMode === "gomme" && hoverOnShape) {
+      if (mode === "edition" && subMode === "gomme" && hoverOnShapeforce) {
         ctx.fillStyle = "rgba(255, 31, 31, 0.3)";
       } else {
         ctx.fillStyle = "rgba(185, 13, 13, 0.37)";
       }
+
+      //creation de la fleche au centre de la forme
+      // Calcul du centroïde du polygone
+      let centerX = 0, centerY = 0;
+      for (let idx of cycle) {
+        centerX += forcePoints[idx].x;
+        centerY += forcePoints[idx].y;
+      }
+      centerX /= cycle.length;
+      centerY /= cycle.length;
+      arrows.push({ startX: centerX, startY: centerY, endX: centerX-50, endY: centerY });
+            
       ctx.fill();
-    }
+    } else { arrows.pop(); } // Si pas de cycle, on retire la dernière flèche ajoutée
   }
 
   // Tracer les lignes avec opacité réduite si survol en gomme
@@ -286,7 +318,7 @@ function drawForceFormes() {
     ctx.beginPath();
     ctx.moveTo(p1.x, p1.y);
     ctx.lineTo(p2.x, p2.y);
-    if (mode === "edition" && subMode === "gomme" && i === hoverLineIndex) {
+    if (mode === "edition" && subMode === "gomme" && i === hoverLineIndexforce) {
       ctx.strokeStyle = "rgba(124, 42, 42, 0.3)";
     } else {
       ctx.strokeStyle = "rgba(145, 33, 33, 0.63)";
@@ -309,8 +341,8 @@ function drawForceFormes() {
     forcePoints.forEach((p, i) => {
       ctx.beginPath();
       ctx.arc(p.x, p.y, 8, 0, 2 * Math.PI);
-      if (subMode === "gomme" && i === hoverPointIndex) {
-        ctx.fillStyle = "rgba(255, 0, 0, 0.3)";
+      if (subMode === "gomme" && i === hoverPointIndexforce) {
+        ctx.fillStyle = "rgba(255, 0, 0, 0.16)";
       } else {
         ctx.fillStyle = subMode === "gomme" && p.toDelete ? "orange" : "red";
       }
@@ -320,7 +352,7 @@ function drawForceFormes() {
     if (subMode === "pointForce") {
       ctx.beginPath();
       ctx.arc(mouseX, mouseY, 6, 0, 2 * Math.PI);
-      ctx.fillStyle = "#e6adadff";
+      ctx.fillStyle = "#e08d8dff";
       ctx.fill();
     }
 
@@ -333,57 +365,57 @@ function drawForceFormes() {
   }
 }
 
-// function drawArrow(arrow, index) {
-//   const { startX, startY, endX, endY } = arrow;
-//   const dx = endX - startX;
-//   const dy = endY - startY;
-//   const length = Math.sqrt(dx * dx + dy * dy);
-//   const angle = Math.atan2(dy, dx);
-//   const force = length * 20;
-//   arrow.force = force;
-//   const arrowWidth = 5 + length / 50;
+function drawArrow(arrow, index) {
+  const { startX, startY, endX, endY } = arrow;
+  const dx = endX - startX;
+  const dy = endY - startY;
+  const length = Math.sqrt(dx * dx + dy * dy);
+  const angle = Math.atan2(dy, dx);
+  const force = length * 20;
+  arrow.force = force;
+  const arrowWidth = 5 + length / 50;
 
-//   ctx.strokeStyle = "red";
-//   if (mode === "edition" && subMode === "gomme" && index === hoverArrowIndex) {
-//     ctx.strokeStyle = "rgba(255,0,0,0.3)";
-//   }
-//   ctx.lineWidth = arrowWidth;
-//   ctx.beginPath();
-//   ctx.moveTo(startX, startY);
-//   ctx.lineTo(endX, endY);
-//   ctx.stroke();
-//   ctx.lineWidth = 1;
+  ctx.strokeStyle = "red";
+  if (mode === "edition" && subMode === "gomme" && index === hoverArrowIndex) {
+    ctx.strokeStyle = "rgba(255,0,0,0.3)";
+  }
+  ctx.lineWidth = arrowWidth;
+  ctx.beginPath();
+  ctx.moveTo(startX, startY);
+  ctx.lineTo(endX, endY);
+  ctx.stroke();
+  ctx.lineWidth = 1;
 
-//   const headLength = 10 + (10 * length) / 50;
-//   ctx.beginPath();
-//   ctx.moveTo(endX, endY);
-//   ctx.lineTo(
-//     endX - headLength * Math.cos(angle - 0.5),
-//     endY - headLength * Math.sin(angle - 0.5)
-//   );
-//   ctx.lineTo(
-//     endX - headLength * Math.cos(angle + 0.5),
-//     endY - headLength * Math.sin(angle + 0.5)
-//   );
-//   ctx.closePath();
-//   ctx.fillStyle = "red";
-//   ctx.fill();
+  const headLength = 10 + (10 * length) / 50;
+  ctx.beginPath();
+  ctx.moveTo(endX, endY);
+  ctx.lineTo(
+    endX - headLength * Math.cos(angle - 0.5),
+    endY - headLength * Math.sin(angle - 0.5)
+  );
+  ctx.lineTo(
+    endX - headLength * Math.cos(angle + 0.5),
+    endY - headLength * Math.sin(angle + 0.5)
+  );
+  ctx.closePath();
+  ctx.fillStyle = "red";
+  ctx.fill();
 
-//   ctx.fillStyle = "black";
-//   ctx.font = "14px sans-serif";
-//   ctx.fillText(`${Math.round(force)} N`, startX + dx / 2, startY + dy / 2 - 10);
+  ctx.fillStyle = "black";
+  ctx.font = "14px sans-serif";
+  ctx.fillText(`${Math.round(force)} N`, startX + dx / 2, startY + dy / 2 - 10);
 
-//   if (mode === "edition" && subMode === "deplacement") {
-//     ctx.beginPath();
-//     ctx.arc(startX, startY, 7, 0, 2 * Math.PI);
-//     ctx.fillStyle = "orange";
-//     ctx.fill();
-//     ctx.beginPath();
-//     ctx.arc(endX, endY, 7, 0, 2 * Math.PI);
-//     ctx.fillStyle = "orange";
-//     ctx.fill();
-//   }
-// }
+  if (mode === "edition" && subMode === "deplacement") {
+    ctx.beginPath();
+    ctx.arc(startX, startY, 7, 0, 2 * Math.PI);
+    ctx.fillStyle = "orange";
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(endX, endY, 7, 0, 2 * Math.PI);
+    ctx.fillStyle = "orange";
+    ctx.fill();
+  }
+}
 
 function drawButtons() {
   ctx.fillStyle = mode === "edition" ? "#007bff" : "#6c757d";
@@ -413,15 +445,6 @@ function drawButtons() {
       ctx.fillText(m.label, 30, 80 + i * 40);
     });
 
-    // ctx.fillStyle = "#28a745";
-    // ctx.fillRect(canvas.width * 0.7, 20, 110, 30);
-    // ctx.fillStyle = "white";
-    // ctx.fillText("Ajouter Flèche", canvas.width * 0.7 + 5, 40);
-    // const shapeX = canvas.width * 0.7;
-    // const baseY = 60;
-    // const shapeSize = 30;
-    // const spacing = 40;
-    //ctx.fillText(`(${arrows.length})`, canvas.width * 0.7 + 120, 40);
   }
 
   ctx.fillStyle = "#ffc107";
@@ -439,8 +462,21 @@ function redraw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   drawLameFormes();
   drawForceFormes();
-  //arrows.forEach(drawArrow);
+  arrows.forEach(drawArrow);
   drawButtons();
+}
+
+function isPointInPolygon(px, py, polygonPoints) {
+  let inside = false;
+  for (let i = 0, j = polygonPoints.length - 1; i < polygonPoints.length; j = i++) {
+    const xi = polygonPoints[i].x, yi = polygonPoints[i].y;
+    const xj = polygonPoints[j].x, yj = polygonPoints[j].y;
+
+    const intersect = ((yi > py) !== (yj > py)) &&
+                      (px < ((xj - xi) * (py - yi)) / (yj - yi + 0.00001) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
 }
 
 canvas.addEventListener("mousemove", (e) => {
@@ -448,68 +484,62 @@ canvas.addEventListener("mousemove", (e) => {
   mouseX = e.clientX - rect.left;
   mouseY = e.clientY - rect.top;
 
-  // Gestion du déplacement de la forme complète
-  if (draggingShape) {
-    if (typeof draggingShape === "object") {
-      const dx = mouseX - draggingShape.prevX;
-      const dy = mouseY - draggingShape.prevY;
-      moveShape(dx, dy);
-      draggingShape.prevX = mouseX;
-      draggingShape.prevY = mouseY;
-    } else if (draggingShape === true) {
-      draggingShape = { prevX: mouseX, prevY: mouseY };
+  // Gestion du déplacement de la forme complète lame
+  if (draggingShapelame) {
+    if (typeof draggingShapelame === "object") {
+      const dx = mouseX - draggingShapelame.prevX;
+      const dy = mouseY - draggingShapelame.prevY;
+      moveShape("lame",dx, dy);
+      draggingShapelame.prevX = mouseX;
+      draggingShapelame.prevY = mouseY;
+    } else if (draggingShapelame === true) {
+      draggingShapelame = { prevX: mouseX, prevY: mouseY };
+    }
+    redraw();
+    return;  // On arrête ici car priorité au drag forme
+  }
+  // Gestion du déplacement de la forme complète force
+  if (draggingShapeforce) {
+    if (typeof draggingShapeforce === "object") {
+      const dx = mouseX - draggingShapeforce.prevX;
+      const dy = mouseY - draggingShapeforce.prevY;
+      moveShape("force",dx, dy);
+      draggingShapeforce.prevX = mouseX;
+      draggingShapeforce.prevY = mouseY;
+    } else if (draggingShapeforce === true) {
+      draggingShapeforce = { prevX: mouseX, prevY: mouseY };
     }
     redraw();
     return;  // On arrête ici car priorité au drag forme
   }
 
-  // Réinitialiser hover (pour gomme)
-  hoverPointIndex = null;
-  hoverLineIndex = null;
-  hoverArrowIndex = null;
-  hoverOnShape = false;
-
   if (mode === "edition") {
     if (subMode === "gomme") {
-      // Survol point ?
+      // Survol point lame ?
       for (let i = 0; i < lamePoints.length; i++) {
         if (Math.hypot(mouseX - lamePoints[i].x, mouseY - lamePoints[i].y) < 10) {
-          hoverPointIndex = i;
+          hoverPointIndexlame = i;
           break;
+        } else {
+          hoverPointIndexlame = null; // Reset if not hovering
         }
       }
-      // Survol ligne ?
-      if (hoverPointIndex === null) {
+      // Survol ligne lame ?
+      if (hoverPointIndexlame === null) {
         for (let i = 0; i < lameLines.length; i++) {
           const [a, b] = lameLines[i];
           const p1 = lamePoints[a];
           const p2 = lamePoints[b];
           if (pointLineDistance(mouseX, mouseY, p1.x, p1.y, p2.x, p2.y) < 8) {
-            hoverLineIndex = i;
+            hoverLineIndexlame = i;
             break;
+          } else {
+            hoverLineIndexlame = null; // Reset if not hovering
           }
         }
       }
-      // Survol flèche ?
-      if (hoverPointIndex === null && hoverLineIndex === null) {
-        for (let i = 0; i < arrows.length; i++) {
-          const arr = arrows[i];
-          if (
-            Math.hypot(mouseX - arr.startX, mouseY - arr.startY) < 10 ||
-            Math.hypot(mouseX - arr.endX, mouseY - arr.endY) < 10
-          ) {
-            hoverArrowIndex = i;
-            break;
-          }
-          // corps flèche
-          if (pointLineDistance(mouseX, mouseY, arr.startX, arr.startY, arr.endX, arr.endY) < 10) {
-            hoverArrowIndex = i;
-            break;
-          }
-        }
-      }
-      // Survol forme grise ? (polygone)
-      if (hoverPointIndex === null && hoverLineIndex === null && hoverArrowIndex === null) {
+      // Survol forme grise lame ? (polygone)
+      if (hoverPointIndexlame === null && hoverLineIndexlame === null) {
         const adjacency = {};
         for (let i = 0; i < lamePoints.length; i++) adjacency[i] = [];
         for (let [a, b] of lameLines) {
@@ -546,47 +576,144 @@ canvas.addEventListener("mousemove", (e) => {
             }
             ctx.closePath();
             if (ctx.isPointInPath(mouseX, mouseY)) {
-              hoverOnShape = true;
+              hoverOnShapelame = true;
               break;
+            } else {
+              hoverOnShapelame = false; // Reset if not hovering
             }
           }
         }
       }
+
+      // Survol point force ?
+      for (let i = 0; i < forcePoints.length; i++) {
+        if (Math.hypot(mouseX - forcePoints[i].x, mouseY - forcePoints[i].y) < 10) {
+          hoverPointIndexforce = i;
+          break;
+        } else {
+          hoverPointIndexforce = null; // Reset if not hovering
+        }
+      }
+      // Survol ligne force ?
+      if (hoverPointIndexforce === null) {
+        for (let i = 0; i < forceLines.length; i++) {
+          const [a, b] = forceLines[i];
+          const p1 = forcePoints[a];
+          const p2 = forcePoints[b];
+          if (pointLineDistance(mouseX, mouseY, p1.x, p1.y, p2.x, p2.y) < 8) {
+            hoverLineIndexforce = i;
+            break;
+          } else {
+            hoverLineIndexforce = null; // Reset if not hovering
+          }
+        }
+      }
+      // Survol forme grise force ? (polygone)
+      if (hoverPointIndexforce === null && hoverLineIndexforce === null) {
+        const adjacency = {};
+        for (let i = 0; i < forcePoints.length; i++) adjacency[i] = [];
+        for (let [a, b] of forceLines) {
+          adjacency[a].push(b);
+          adjacency[b].push(a);
+        }
+        function findCycle(start) {
+          const path = [];
+          const visited = new Set();
+          function dfs(current, prev) {
+            path.push(current);
+            visited.add(current);
+            for (const neighbor of adjacency[current]) {
+              if (neighbor === prev) continue;
+              if (neighbor === start && path.length > 2) return true;
+              if (!visited.has(neighbor)) {
+                if (dfs(neighbor, current)) return true;
+              }
+            }
+            path.pop();
+            return false;
+          }
+          return dfs(start, -1) ? path.slice() : null;
+        }
+        for (let i = 0; i < forcePoints.length; i++) {
+          const cycle = findCycle(i);
+          if (cycle) {
+            ctx.beginPath();
+            const first = forcePoints[cycle[0]];
+            ctx.moveTo(first.x, first.y);
+            for (let j = 1; j < cycle.length; j++) {
+              const pt = forcePoints[cycle[j]];
+              ctx.lineTo(pt.x, pt.y);
+            }
+            ctx.closePath();
+            if (ctx.isPointInPath(mouseX, mouseY)) {
+              hoverOnShapeforce = true;
+              break;
+            } else {
+              hoverOnShapeforce = false; // Reset if not hovering
+            }
+          }
+        }
+      }
+
+      // // Survol flèche ?
+      // if (hoverPointIndex === null && hoverLineIndex === null) {
+      //   for (let i = 0; i < arrows.length; i++) {
+      //     const arr = arrows[i];
+      //     if (
+      //       Math.hypot(mouseX - arr.startX, mouseY - arr.startY) < 10 ||
+      //       Math.hypot(mouseX - arr.endX, mouseY - arr.endY) < 10
+      //     ) {
+      //       hoverArrowIndex = i;
+      //       break;
+      //     }
+      //     // corps flèche
+      //     if (pointLineDistance(mouseX, mouseY, arr.startX, arr.startY, arr.endX, arr.endY) < 10) {
+      //       hoverArrowIndex = i;
+      //       break;
+      //     }
+      //   }
+      // }
     }
   }
 
   if (mode === "edition" && subMode === "deplacement") {
-    if (draggingPointIndex !== null) {
-      lamePoints[draggingPointIndex].x = mouseX;
-      lamePoints[draggingPointIndex].y = mouseY;
+    if (draggingPointIndexlame !== null) {
+      lamePoints[draggingPointIndexlame].x = mouseX;
+      lamePoints[draggingPointIndexlame].y = mouseY;
       redraw();
       return;
     }
-    if (draggingArrowPoint !== null) {
-      const arr = arrows[draggingArrow];
-      if (draggingArrowPoint === "start") {
-        arr.startX = mouseX;
-        arr.startY = mouseY;
-      } else if (draggingArrowPoint === "end") {
-        arr.endX = mouseX;
-        arr.endY = mouseY;
-      }
+    if (draggingPointIndexforce !== null) {
+      forcePoints[draggingPointIndexforce].x = mouseX;
+      forcePoints[draggingPointIndexforce].y = mouseY;
       redraw();
       return;
     }
-    if (draggingArrow !== null) {
-      const arr = arrows[draggingArrow];
-      const dx = mouseX - arr._dragPrevX;
-      const dy = mouseY - arr._dragPrevY;
-      arr.startX += dx;
-      arr.startY += dy;
-      arr.endX += dx;
-      arr.endY += dy;
-      arr._dragPrevX = mouseX;
-      arr._dragPrevY = mouseY;
-      redraw();
-      return;
-    }
+    // if (draggingArrowPoint !== null) {
+    //   const arr = arrows[draggingArrow];
+    //   if (draggingArrowPoint === "start") {
+    //     arr.startX = mouseX;
+    //     arr.startY = mouseY;
+    //   } else if (draggingArrowPoint === "end") {
+    //     arr.endX = mouseX;
+    //     arr.endY = mouseY;
+    //   }
+    //   redraw();
+    //   return;
+    // }
+    // if (draggingArrow !== null) {
+    //   const arr = arrows[draggingArrow];
+    //   const dx = mouseX - arr._dragPrevX;
+    //   const dy = mouseY - arr._dragPrevY;
+    //   arr.startX += dx;
+    //   arr.startY += dy;
+    //   arr.endX += dx;
+    //   arr.endY += dy;
+    //   arr._dragPrevX = mouseX;
+    //   arr._dragPrevY = mouseY;
+    //   redraw();
+    //   return;
+    // }
   }
 
   redraw();
@@ -596,24 +723,24 @@ canvas.addEventListener("mousedown", (e) => {
   const rect = canvas.getBoundingClientRect();
   const mx = e.clientX - rect.left;
   const my = e.clientY - rect.top;
-  console.log("mousedown at", mx, my);
+  //console.log("mousedown at", mx, my);
 
   // Undo
   const undoX = canvas.width / 2 - 60;
   const redoX = canvas.width / 2 + 10;
 
-  if (mx >= undoX && mx <= undoX + 50 && my >= 20 && my <= 50) {
-    console.log("Undo clicked");
+  if (mx >= undoX && mx <= undoX + 50 && my >= 20 && my <= 50) { // Undo
+    //console.log("Undo clicked");
     undo();
     return;
   }
-  if (mx >= redoX && mx <= redoX + 50 && my >= 20 && my <= 50) {
-    console.log("Redo clicked");
+  if (mx >= redoX && mx <= redoX + 50 && my >= 20 && my <= 50) { // Redo
+    //console.log("Redo clicked");
     redo();
     return;
   }
 
-  if (mx >= 20 && mx <= 120 && my >= 20 && my <= 50) {
+  if (mx >= 20 && mx <= 120 && my >= 20 && my <= 50) { // Bouton Edition
     mode = "edition";
     subMode = null;
     lameTempline = null;
@@ -623,7 +750,7 @@ canvas.addEventListener("mousedown", (e) => {
     redraw();
     return;
   }
-  if (mx >= 130 && mx <= 240 && my >= 20 && my <= 50) {
+  if (mx >= 130 && mx <= 240 && my >= 20 && my <= 50) { // Bouton Simulation
     mode = "simulation";
     subMode = null;
     lameTempline = null;
@@ -634,7 +761,7 @@ canvas.addEventListener("mousedown", (e) => {
     return;
   }
 
-  if (mode === "edition") {
+  if (mode === "edition") { // boutons de sous-modes
     const buttonHeight = 30;
     const buttonSpacing = 40;
     const buttonStartY = 60;
@@ -651,19 +778,15 @@ canvas.addEventListener("mousedown", (e) => {
       }
     }
 
-    if (mx >= canvas.width * 0.7 && mx <= canvas.width * 0.7 + 110 && my >= 20 && my <= 50) {
-      arrows.push({ startX: 1000, startY: 100, endX: 1020, endY: 130 });
-      redraw();
-      return;
-    }
+    
 
-    if (subMode === "pointLame") {
+    if (subMode === "pointLame") { // Ajouter un point lame
       saveState();
       lamePoints.push({ x: mx, y: my });
       redraw();
       return;
     }
-    if (subMode === "lienLame") {
+    if (subMode === "lienLame") { // Tracer une ligne entre deux points lame
       // Recherche point proche
       let closePointIndex = null;
       for (let i = 0; i < lamePoints.length; i++) {
@@ -688,13 +811,14 @@ canvas.addEventListener("mousedown", (e) => {
         }
       }
     }
-    if (subMode === "pointForce") {
+
+    if (subMode === "pointForce") { // Ajouter un point force
       saveState();
       forcePoints.push({ x: mx, y: my });
       redraw();
       return;
     }
-    if (subMode === "lienForce") {
+    if (subMode === "lienForce") { // Tracer une ligne entre deux points force
       // Recherche point proche
       let closePointIndex = null;
       for (let i = 0; i < forcePoints.length; i++) {
@@ -720,55 +844,75 @@ canvas.addEventListener("mousedown", (e) => {
       }
     }
 
-    if (subMode === "deplacement") {
-      // Détecter point proche
+    if (subMode === "deplacement") { // Déplacement de points ou formes
+      // Détecter point proche lame
+      for (let i = 0; i < lamePoints.length; i++) {
+        if (Math.hypot(lamePoints[i].x - mx, lamePoints[i].y - my) < 10) {
+          draggingPointIndexlame = i;
+          saveState();
+          return;
+        }
+      }
+      // Détecter point proche force
       for (let i = 0; i < forcePoints.length; i++) {
         if (Math.hypot(forcePoints[i].x - mx, forcePoints[i].y - my) < 10) {
-          draggingPointIndex = i;
+          draggingPointIndexforce = i;
           saveState();
           return;
         }
       }
-      // Détecter flèche
-      for (let i = 0; i < arrows.length; i++) {
-        const arr = arrows[i];
-        if (Math.hypot(arr.startX - mx, arr.startY - my) < 10) {
-          draggingArrow = i;
-          draggingArrowPoint = "start";
-          arr._dragPrevX = mx;
-          arr._dragPrevY = my;
-          saveState();
-          return;
-        }
-        if (Math.hypot(arr.endX - mx, arr.endY - my) < 10) {
-          draggingArrow = i;
-          draggingArrowPoint = "end";
-          arr._dragPrevX = mx;
-          arr._dragPrevY = my;
-          saveState();
-          return;
-        }
+      // // Détecter flèche
+      // for (let i = 0; i < arrows.length; i++) {
+      //   const arr = arrows[i];
+      //   if (Math.hypot(arr.startX - mx, arr.startY - my) < 10) {
+      //     draggingArrow = i;
+      //     draggingArrowPoint = "start";
+      //     arr._dragPrevX = mx;
+      //     arr._dragPrevY = my;
+      //     saveState();
+      //     return;
+      //   }
+      //   if (Math.hypot(arr.endX - mx, arr.endY - my) < 10) {
+      //     draggingArrow = i;
+      //     draggingArrowPoint = "end";
+      //     arr._dragPrevX = mx;
+      //     arr._dragPrevY = my;
+      //     saveState();
+      //     return;
+      //   }
+      // }
+      // // Déplacer flèche complète
+      // for (let i = 0; i < arrows.length; i++) {
+      //   const arr = arrows[i];
+      //   if (pointLineDistance(mx, my, arr.startX, arr.startY, arr.endX, arr.endY) < 10) {
+      //     draggingArrow = i;
+      //     draggingArrowPoint = null;
+      //     arr._dragPrevX = mx;
+      //     arr._dragPrevY = my;
+      //     saveState();
+      //     return;
+      //   }
+      // }
+
+      // Déplacer forme complète lame
+      if (isPointInPolygon(mx, my, lamePoints)) {
+        draggingShapelame = true;
+      } else {
+        draggingShapelame = null; // Reset if not hovering
       }
-      // Déplacer flèche complète
-      for (let i = 0; i < arrows.length; i++) {
-        const arr = arrows[i];
-        if (pointLineDistance(mx, my, arr.startX, arr.startY, arr.endX, arr.endY) < 10) {
-          draggingArrow = i;
-          draggingArrowPoint = null;
-          arr._dragPrevX = mx;
-          arr._dragPrevY = my;
-          saveState();
-          return;
-        }
+      // Déplacer forme complète force
+      if (isPointInPolygon(mx, my, forcePoints)) {
+        draggingShapeforce = true;
+      } else {
+        draggingShapeforce = null; // Reset if not hovering
       }
-      // Déplacer forme complète
-      draggingShape = true;
+
       saveState();
       return;
     }
 
     if (subMode === "gomme") {
-      // Supprimer point survolé
+      // Supprimer point survolé lame
       for (let i = 0; i < lamePoints.length; i++) {
         if (Math.hypot(lamePoints[i].x - mx, lamePoints[i].y - my) < 10) {
           saveState();
@@ -784,7 +928,23 @@ canvas.addEventListener("mousedown", (e) => {
           return;
         }
       }
-      // Supprimer ligne survolée
+      // Supprimer point survolé force
+      for (let i = 0; i < forcePoints.length; i++) {
+        if (Math.hypot(forcePoints[i].x - mx, forcePoints[i].y - my) < 10) {
+          saveState();
+          forcePoints.splice(i, 1);
+          // Supprimer lignes liées
+          forceLines = forceLines.filter(l => l[0] !== i && l[1] !== i);
+          // Recalibrer indices des lignes
+          forceLines = forceLines.map(([a, b]) => [
+            a > i ? a - 1 : a,
+            b > i ? b - 1 : b
+          ]);
+          redraw();
+          return;
+        }
+      }
+      // Supprimer ligne survolée lame
       for (let i = 0; i < lameLines.length; i++) {
         const [a, b] = lameLines[i];
         const p1 = lamePoints[a];
@@ -796,29 +956,44 @@ canvas.addEventListener("mousedown", (e) => {
           return;
         }
       }
-      // Supprimer flèche survolée
-      for (let i = 0; i < arrows.length; i++) {
-        const arr = arrows[i];
-        if (
-          Math.hypot(arr.startX - mx, arr.startY - my) < 10 ||
-          Math.hypot(arr.endX - mx, arr.endY - my) < 10 ||
-          pointLineDistance(mx, my, arr.startX, arr.startY, arr.endX, arr.endY) < 10
-        ) {
+      // Supprimer ligne survolée force
+      for (let i = 0; i < forceLines.length; i++) {
+        const [a, b] = forceLines[i];
+        const p1 = forcePoints[a];
+        const p2 = forcePoints[b];
+        if (pointLineDistance(mx, my, p1.x, p1.y, p2.x, p2.y) < 8) {
           saveState();
-          arrows.splice(i, 1);
+          forceLines.splice(i, 1);
           redraw();
           return;
         }
       }
+      // // Supprimer flèche survolée
+      // for (let i = 0; i < arrows.length; i++) {
+      //   const arr = arrows[i];
+      //   if (
+      //     Math.hypot(arr.startX - mx, arr.startY - my) < 10 ||
+      //     Math.hypot(arr.endX - mx, arr.endY - my) < 10 ||
+      //     pointLineDistance(mx, my, arr.startX, arr.startY, arr.endX, arr.endY) < 10
+      //   ) {
+      //     saveState();
+      //     arrows.splice(i, 1);
+      //     redraw();
+      //     return;
+      //   }
+      // }
     }
   }
 });
 
 canvas.addEventListener("mouseup", (e) => {
-  draggingPointIndex = null;
-  draggingArrow = null;
-  draggingArrowPoint = null;
-  draggingShape = null;
+  draggingPointIndexlame = null;
+  draggingShapelame = null;
+  draggingPointIndexforce = null;
+  draggingShapeforce = null;
+  //draggingArrow = null;
+  //draggingArrowPoint = null;
+  
 
 });
 
@@ -851,26 +1026,36 @@ function pointLineDistance(px, py, x1, y1, x2, y2) {
   return Math.sqrt(dx * dx + dy * dy);
 }
 
-function moveShape(dx, dy) {
-  lamePoints.forEach(p => {
-    p.x += dx;
-    p.y += dy;
-  });
-  
-  forcePoints.forEach(p => {
-    p.x += dx;
-    p.y += dy;
-  });
+function moveShape(shape, dx, dy) {
+  if (shape === "lame") {
+    lamePoints.forEach(p => {
+      p.x += dx;
+      p.y += dy;
+    });
 
-  arrows.forEach(arr => {
-    arr.startX += dx;
-    arr.startY += dy;
-    arr.endX += dx;
-    arr.endY += dy;
-  });
+  } else if (shape === "force") {
+    forcePoints.forEach(p => {
+      p.x += dx;
+      p.y += dy;
+    });
+  }
+
+  // arrows.forEach(arr => {
+  //   arr.startX += dx;
+  //   arr.startY += dy;
+  //   arr.endX += dx;
+  //   arr.endY += dy;
+  // });
   redraw();
 }
 
 // Initial state save
 saveState();
 redraw();
+
+//la suite du projet est de rajouter des fleches de force dans les polygone de force les fleches leur seront donclié
+//on pourras choisir le type de force (N, m/s, km/h ) et ca valeur
+//on choisit la direction de la force en tournant la fleche
+//par la suite, la simulation c'est :
+//la "collision" entre le polygone de force selon la fleche de force et les polygones de lame
+//les "collisions" seront represantées par des fleches de force internes aux polygones de lame (simuler au plus proche de la réalité)
