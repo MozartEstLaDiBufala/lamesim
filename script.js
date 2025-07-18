@@ -4,18 +4,21 @@ const ctx = canvas.getContext("2d"); // ctx est le contexte de dessin du canvas,
 let arrows = []; //let signifie que la variable peut être modifiée, contrairement à const qui est une constante
 let lamePoints = [];
 let lameLines = [];
+let lameShapeNbActuel = 0; // pour compter le nombre de formes de lame
+let lameShapeNbAncien = 0; // pour compter le nombre de formes de lame
+
 let forcePoints = [];
 let forceLines = [];
+let forceShapeNb = 0; // pour compter le nombre de formes de force
 
 let draggingPointIndexlame = null;
 let draggingShapelame = null;
 let draggingPointIndexforce = null;
 let draggingShapeforce = null;
-//let draggingArrow = null;
-//let draggingArrowPoint = null;
+let draggingArrow = null;
+let draggingArrowPoint = null;
 
-
-let mode = "simulation";
+let mode = "edition"; // mode d'édition ou de simulation
 let subMode = null;
 let mouseX = 0;
 let mouseY = 0;
@@ -36,7 +39,14 @@ let hoverOnShapelame = false;
 let hoverPointIndexforce = null; // nouveaux états pour survol en gomme
 let hoverLineIndexforce = null;
 let hoverOnShapeforce = false;
-//let hoverArrowIndex = null;
+
+let metalGraph = []; // {neighbors: [{i: ..., weight: ...}], intensity: ...}
+let forceSources = []; // {pointIndex, strength}
+let tickCounter = 0;
+
+let contacts = []; // pour stocker les contacts entre les formes de lame et de force
+let forceSegments = []; // pour stocker les segments de force
+let lameSegments = []; // pour stocker les segments de lame
 
 function saveState() { //fonction pour sauvegarder l'état actuel du dessin
   // On utilise JSON.parse(JSON.stringify(...)) pour faire une copie profonde des tableaux
@@ -160,7 +170,7 @@ function drawLameFormes() {
   }
 
   const drawnCycles = new Set();// Ensemble pour éviter de dessiner plusieurs fois le même cycle
-
+  lameShapeNbActuel = 0; // Réinitialise le compteur de formes de lame
   for (let i = 0; i < lamePoints.length; i++) {// Pour chaque point, on cherche un cycle
     const cycle = findCycle(i);// on utilise la fonction findCycle pour trouver les cycles
     if (cycle) {
@@ -177,6 +187,8 @@ function drawLameFormes() {
         ctx.lineTo(pt.x, pt.y);
       }
       ctx.closePath();
+      lameShapeNbActuel++;
+      
       if (mode === "edition" && subMode === "gomme" && hoverOnShapelame) {
         ctx.fillStyle = "rgba(200,200,200,0.3)";
       } else {
@@ -184,6 +196,14 @@ function drawLameFormes() {
       }
       ctx.fill();
     }
+    if (lameShapeNbActuel > lameShapeNbAncien) {
+      lameShapeNbAncien = lameShapeNbActuel; // Met à jour l'ancien nombre de formes de lame
+      initializeMetalGraph(); // Initialisation du graphe métallique
+    } else if (lameShapeNbActuel < lameShapeNbAncien) {
+      lameShapeNbAncien = lameShapeNbActuel; // Met à jour l'ancien nombre de formes de lame
+      metalGraph = [];
+    }
+    //console.log('metalGraph', metalGraph);
   }
 
   // Tracer les lignes avec opacité réduite si survol en gomme
@@ -271,10 +291,11 @@ function drawForceFormes() {
   }
 
   const drawnCycles = new Set();// Ensemble pour éviter de dessiner plusieurs fois le même cycle
-
+  forceShapeNb = 0; // Réinitialise le compteur de formes de force
   for (let i = 0; i < forcePoints.length; i++) {// Pour chaque point, on cherche un cycle
     const cycle = findCycle(i);// on utilise la fonction findCycle pour trouver les cycles
     if (cycle) {
+      forceShapeNb++;
       const key = [...cycle].sort().join("-");
       if (drawnCycles.has(key)) continue;
       drawnCycles.add(key);
@@ -294,19 +315,22 @@ function drawForceFormes() {
         ctx.fillStyle = "rgba(185, 13, 13, 0.37)";
       }
 
-      //creation de la fleche au centre de la forme
-      // Calcul du centroïde du polygone
-      let centerX = 0, centerY = 0;
-      for (let idx of cycle) {
-        centerX += forcePoints[idx].x;
-        centerY += forcePoints[idx].y;
+      //creation de la fleche au centre de la forme si elle n'existe pas deja
+      if (forceShapeNb > arrows.length) {
+        // Calcul du centroïde du polygone
+        let centerX = 0, centerY = 0;
+        for (let idx of cycle) {
+          centerX += forcePoints[idx].x;
+          centerY += forcePoints[idx].y;
+        }
+        centerX /= cycle.length;
+        centerY /= cycle.length;
+        
+        arrows.push({ startX: centerX, startY: centerY, endX: centerX-50, endY: centerY });
       }
-      centerX /= cycle.length;
-      centerY /= cycle.length;
-      arrows.push({ startX: centerX, startY: centerY, endX: centerX-50, endY: centerY });
-            
+
       ctx.fill();
-    } else { arrows.pop(); } // Si pas de cycle, on retire la dernière flèche ajoutée
+    }
   }
 
   // Tracer les lignes avec opacité réduite si survol en gomme
@@ -362,6 +386,10 @@ function drawForceFormes() {
       ctx.fillStyle = "black";
       ctx.fill();
     }
+
+    if (forceShapeNb < arrows.length) {
+        arrows.splice(forceShapeNb, arrows.length - forceShapeNb); // Supprime les flèches en trop
+    }
   }
 }
 
@@ -376,9 +404,7 @@ function drawArrow(arrow, index) {
   const arrowWidth = 5 + length / 50;
 
   ctx.strokeStyle = "red";
-  if (mode === "edition" && subMode === "gomme" && index === hoverArrowIndex) {
-    ctx.strokeStyle = "rgba(255,0,0,0.3)";
-  }
+  
   ctx.lineWidth = arrowWidth;
   ctx.beginPath();
   ctx.moveTo(startX, startY);
@@ -415,6 +441,43 @@ function drawArrow(arrow, index) {
     ctx.fillStyle = "orange";
     ctx.fill();
   }
+}
+
+function drawDiffusion() {
+  simulateDiffusionTick();  // Appelle la fonction de simulation de diffusion à chaque frame
+  
+  for (let i = 0; i < lameLines.length; i++) {
+    
+    const [a, b] = lameLines[i];
+    
+    if (metalGraph.length === 0) continue; // continue signifie passer à l'itération suivante, n'execute pas le reste du code dans la boucle pour cette itération
+    const intensity = (metalGraph[a].intensity + metalGraph[b].intensity) / 2;
+    //console.log('metalGraph', metalGraph);
+    //console.log('intensity', intensity);
+    if (intensity < 0.01) continue;
+    
+    const p1 = lamePoints[a];
+    const p2 = lamePoints[b];
+    const midX = (p1.x + p2.x) / 2;
+    const midY = (p1.y + p2.y) / 2;
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const len = Math.hypot(dx, dy);
+    const normX = dx / len;
+    const normY = dy / len;
+
+    const arrowLength = 20 + intensity * 30;
+    const arrowWidth = 2 + intensity * 5;
+    ctx.strokeStyle = `rgba(0, 120, 255, ${Math.min(1, intensity)})`;
+    ctx.lineWidth = arrowWidth;
+
+    ctx.beginPath();
+    ctx.moveTo(midX, midY);
+    ctx.lineTo(midX + normX * arrowLength, midY + normY * arrowLength);
+    ctx.stroke();
+    
+  }
+  requestAnimationFrame(drawDiffusion); // Redessine à chaque frame pour l'animation
 }
 
 function drawButtons() {
@@ -477,6 +540,59 @@ function isPointInPolygon(px, py, polygonPoints) {
     if (intersect) inside = !inside;
   }
   return inside;
+}
+
+function pointLineDistance(px, py, x1, y1, x2, y2) {
+  const A = px - x1;
+  const B = py - y1;
+  const C = x2 - x1;
+  const D = y2 - y1;
+
+  const dot = A * C + B * D;
+  const len_sq = C * C + D * D;
+  let param = -1;
+  if (len_sq !== 0) param = dot / len_sq;
+
+  let xx, yy;
+
+  if (param < 0) {
+    xx = x1;
+    yy = y1;
+  } else if (param > 1) {
+    xx = x2;
+    yy = y2;
+  } else {
+    xx = x1 + param * C;
+    yy = y1 + param * D;
+  }
+
+  const dx = px - xx;
+  const dy = py - yy;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function moveShape(shape, dx, dy) {
+  if (shape === "lame") {
+    lamePoints.forEach(p => {
+      p.x += dx;
+      p.y += dy;
+    });
+
+  } else if (shape === "force") {
+    forcePoints.forEach(p => {
+      p.x += dx;
+      p.y += dy;
+    });
+    arrows.forEach(arr => {
+      arr.startX += dx;
+      arr.startY += dy;
+      arr.endX += dx;
+      arr.endY += dy;
+    });
+  }
+
+  
+  redraw();
 }
 
 canvas.addEventListener("mousemove", (e) => {
@@ -655,24 +771,7 @@ canvas.addEventListener("mousemove", (e) => {
         }
       }
 
-      // // Survol flèche ?
-      // if (hoverPointIndex === null && hoverLineIndex === null) {
-      //   for (let i = 0; i < arrows.length; i++) {
-      //     const arr = arrows[i];
-      //     if (
-      //       Math.hypot(mouseX - arr.startX, mouseY - arr.startY) < 10 ||
-      //       Math.hypot(mouseX - arr.endX, mouseY - arr.endY) < 10
-      //     ) {
-      //       hoverArrowIndex = i;
-      //       break;
-      //     }
-      //     // corps flèche
-      //     if (pointLineDistance(mouseX, mouseY, arr.startX, arr.startY, arr.endX, arr.endY) < 10) {
-      //       hoverArrowIndex = i;
-      //       break;
-      //     }
-      //   }
-      // }
+     
     }
   }
 
@@ -689,31 +788,32 @@ canvas.addEventListener("mousemove", (e) => {
       redraw();
       return;
     }
-    // if (draggingArrowPoint !== null) {
-    //   const arr = arrows[draggingArrow];
-    //   if (draggingArrowPoint === "start") {
-    //     arr.startX = mouseX;
-    //     arr.startY = mouseY;
-    //   } else if (draggingArrowPoint === "end") {
-    //     arr.endX = mouseX;
-    //     arr.endY = mouseY;
-    //   }
-    //   redraw();
-    //   return;
-    // }
-    // if (draggingArrow !== null) {
-    //   const arr = arrows[draggingArrow];
-    //   const dx = mouseX - arr._dragPrevX;
-    //   const dy = mouseY - arr._dragPrevY;
-    //   arr.startX += dx;
-    //   arr.startY += dy;
-    //   arr.endX += dx;
-    //   arr.endY += dy;
-    //   arr._dragPrevX = mouseX;
-    //   arr._dragPrevY = mouseY;
-    //   redraw();
-    //   return;
-    // }
+
+    if (draggingArrowPoint !== null) {
+      const arr = arrows[draggingArrow];
+      if (draggingArrowPoint === "start") {
+        arr.startX = mouseX;
+        arr.startY = mouseY;
+      } else if (draggingArrowPoint === "end") {
+        arr.endX = mouseX;
+        arr.endY = mouseY;
+      }
+      redraw();
+      return;
+    }
+    if (draggingArrow !== null) {
+      const arr = arrows[draggingArrow];
+      const dx = mouseX - arr._dragPrevX;
+      const dy = mouseY - arr._dragPrevY;
+      arr.startX += dx;
+      arr.startY += dy;
+      arr.endX += dx;
+      arr.endY += dy;
+      arr._dragPrevX = mouseX;
+      arr._dragPrevY = mouseY;
+      redraw();
+      return;
+    }
   }
 
   redraw();
@@ -757,7 +857,9 @@ canvas.addEventListener("mousedown", (e) => {
     lameTraceStartIndex = null;
     forceTempline = null;
     forceTraceStartIndex = null;
+    creationInstant();
     redraw();
+
     return;
   }
 
@@ -861,38 +963,39 @@ canvas.addEventListener("mousedown", (e) => {
           return;
         }
       }
-      // // Détecter flèche
-      // for (let i = 0; i < arrows.length; i++) {
-      //   const arr = arrows[i];
-      //   if (Math.hypot(arr.startX - mx, arr.startY - my) < 10) {
-      //     draggingArrow = i;
-      //     draggingArrowPoint = "start";
-      //     arr._dragPrevX = mx;
-      //     arr._dragPrevY = my;
-      //     saveState();
-      //     return;
-      //   }
-      //   if (Math.hypot(arr.endX - mx, arr.endY - my) < 10) {
-      //     draggingArrow = i;
-      //     draggingArrowPoint = "end";
-      //     arr._dragPrevX = mx;
-      //     arr._dragPrevY = my;
-      //     saveState();
-      //     return;
-      //   }
-      // }
-      // // Déplacer flèche complète
-      // for (let i = 0; i < arrows.length; i++) {
-      //   const arr = arrows[i];
-      //   if (pointLineDistance(mx, my, arr.startX, arr.startY, arr.endX, arr.endY) < 10) {
-      //     draggingArrow = i;
-      //     draggingArrowPoint = null;
-      //     arr._dragPrevX = mx;
-      //     arr._dragPrevY = my;
-      //     saveState();
-      //     return;
-      //   }
-      // }
+
+      // Détecter flèche
+      for (let i = 0; i < arrows.length; i++) {
+        const arr = arrows[i];
+        if (Math.hypot(arr.startX - mx, arr.startY - my) < 10) {
+          draggingArrow = i;
+          draggingArrowPoint = "start";
+          arr._dragPrevX = mx;
+          arr._dragPrevY = my;
+          saveState();
+          return;
+        }
+        if (Math.hypot(arr.endX - mx, arr.endY - my) < 10) {
+          draggingArrow = i;
+          draggingArrowPoint = "end";
+          arr._dragPrevX = mx;
+          arr._dragPrevY = my;
+          saveState();
+          return;
+        }
+      }
+      // Déplacer flèche complète
+      for (let i = 0; i < arrows.length; i++) {
+        const arr = arrows[i];
+        if (pointLineDistance(mx, my, arr.startX, arr.startY, arr.endX, arr.endY) < 10) {
+          draggingArrow = i;
+          draggingArrowPoint = null;
+          arr._dragPrevX = mx;
+          arr._dragPrevY = my;
+          saveState();
+          return;
+        }
+      }
 
       // Déplacer forme complète lame
       if (isPointInPolygon(mx, my, lamePoints)) {
@@ -968,20 +1071,7 @@ canvas.addEventListener("mousedown", (e) => {
           return;
         }
       }
-      // // Supprimer flèche survolée
-      // for (let i = 0; i < arrows.length; i++) {
-      //   const arr = arrows[i];
-      //   if (
-      //     Math.hypot(arr.startX - mx, arr.startY - my) < 10 ||
-      //     Math.hypot(arr.endX - mx, arr.endY - my) < 10 ||
-      //     pointLineDistance(mx, my, arr.startX, arr.startY, arr.endX, arr.endY) < 10
-      //   ) {
-      //     saveState();
-      //     arrows.splice(i, 1);
-      //     redraw();
-      //     return;
-      //   }
-      // }
+    
     }
   }
 });
@@ -991,69 +1081,158 @@ canvas.addEventListener("mouseup", (e) => {
   draggingShapelame = null;
   draggingPointIndexforce = null;
   draggingShapeforce = null;
-  //draggingArrow = null;
-  //draggingArrowPoint = null;
-  
-
+  draggingArrow = null;
+  draggingArrowPoint = null;
+  //initializeMetalGraph(); // Initialisation du graphe métallique
 });
 
-function pointLineDistance(px, py, x1, y1, x2, y2) {
-  const A = px - x1;
-  const B = py - y1;
-  const C = x2 - x1;
-  const D = y2 - y1;
+function initializeMetalGraph() {
+  metalGraph = lamePoints.map(() => ({
+    neighbors: [],
+    intensity: 0 // force reçue
+  }));
 
-  const dot = A * C + B * D;
-  const len_sq = C * C + D * D;
-  let param = -1;
-  if (len_sq !== 0) param = dot / len_sq;
+  for (let [a, b] of lameLines) {
+    const dx = lamePoints[a].x - lamePoints[b].x;
+    const dy = lamePoints[a].y - lamePoints[b].y;
+    const distance = Math.hypot(dx, dy);
+    const thickness = 3; // cm — peut varier plus tard
+    const weight = thickness / distance; // Plus le métal est épais, plus la diffusion est lente
 
-  let xx, yy;
-
-  if (param < 0) {
-    xx = x1;
-    yy = y1;
-  } else if (param > 1) {
-    xx = x2;
-    yy = y2;
-  } else {
-    xx = x1 + param * C;
-    yy = y1 + param * D;
+    metalGraph[a].neighbors.push({ i: b, weight });
+    metalGraph[b].neighbors.push({ i: a, weight });
   }
-
-  const dx = px - xx;
-  const dy = py - yy;
-  return Math.sqrt(dx * dx + dy * dy);
+  
 }
 
-function moveShape(shape, dx, dy) {
-  if (shape === "lame") {
-    lamePoints.forEach(p => {
-      p.x += dx;
-      p.y += dy;
-    });
+function simulateDiffusionTick() {
+  tickCounter++;
+  if (tickCounter < 60) return;
+  tickCounter = 0;  
+  //console.log('diffusion');
+  const contacts = detectContactsBetweenSegments(forceSegments, lameSegments, 1000);
 
-  } else if (shape === "force") {
-    forcePoints.forEach(p => {
-      p.x += dx;
-      p.y += dy;
-    });
+  console.log("Contacts détectés :", contacts);
+  
+  // 1. Mise à jour des intensités à partir des points de contact
+  for (const pt of contacts) {
+    console.log("a", contacts)
+    let minDist = Infinity;
+    let nearestIndex = -1;
+    for (let i = 0; i < lamePoints.length; i++) {
+      const p = lamePoints[i];
+      const d = Math.hypot(pt.x - p.x, pt.y - p.y);
+      if (d < minDist) {
+        minDist = d;
+        nearestIndex = i;
+      }
+    }
+    console.log("b", nearestIndex)
+    if (nearestIndex !== -1) {
+      metalGraph[nearestIndex].intensity += 1.0; // à moduler par l'angle ou autre
+      
+    }
   }
 
-  // arrows.forEach(arr => {
-  //   arr.startX += dx;
-  //   arr.startY += dy;
-  //   arr.endX += dx;
-  //   arr.endY += dy;
-  // });
-  redraw();
+  // 2. Diffusion de l’intensité dans le graphe
+  const newIntensities = new Array(metalGraph.length).fill(0);
+
+  for (let i = 0; i < metalGraph.length; i++) {
+    const neighbors = metalGraph[i].neighbors;
+    let total = 0;
+    let weightSum = 0;
+
+    for (const neighbor of neighbors) {
+      total += metalGraph[neighbor.i].intensity * neighbor.weight;
+      weightSum += neighbor.weight;
+    }
+
+    if (weightSum > 0) {
+      newIntensities[i] = total / weightSum;
+    } else {
+      newIntensities[i] = metalGraph[i].intensity;
+    }
+  }
+
+  // 3. Mise à jour des intensités
+  for (let i = 0; i < metalGraph.length; i++) {
+    metalGraph[i].intensity = newIntensities[i];
+  }
 }
 
+function projectPointOnSegment(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  if (dx === 0 && dy === 0) return { x: x1, y: y1, onSegment: true };
+
+  const t = ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy);
+  const tClamped = Math.max(0, Math.min(1, t));
+
+  return {
+    x: x1 + tClamped * dx,
+    y: y1 + tClamped * dy,
+    t: tClamped,
+    onSegment: tClamped >= 0 && tClamped <= 1
+  };
+}
+
+function detectContactsBetweenSegments(forceSegments, lameSegments, seuil = 10) {
+  const contacts = [];
+
+  for (const fSeg of forceSegments) {
+    const [fP1, fP2] = fSeg;
+
+    // Pour mieux détecter, on peut échantillonner plusieurs points le long du segment force
+    const nbSamples = 5;
+    for (let i = 0; i <= nbSamples; i++) {
+      const tSample = i / nbSamples;
+      const samplePoint = {
+        x: fP1.x + tSample * (fP2.x - fP1.x),
+        y: fP1.y + tSample * (fP2.y - fP1.y)
+      };
+
+      for (const lSeg of lameSegments) {
+        const [lP1, lP2] = lSeg;
+        const proj = projectPointOnSegment(samplePoint.x, samplePoint.y, lP1.x, lP1.y, lP2.x, lP2.y);
+        const dist = Math.hypot(samplePoint.x - proj.x, samplePoint.y - proj.y);
+
+        if (dist < seuil) {
+          contacts.push({ x: proj.x, y: proj.y });
+        }
+      }
+    }
+  }
+
+  return contacts;
+}
+
+function creationInstant() {
+  // Création de la forme de lame
+  lamePoints = [
+    { x: 100, y: 300 },
+    { x: 200, y: 300 },
+    { x: 200, y: 700 },
+    { x: 100, y: 700 }
+  ];
+  lameLines = [[0, 1], [1, 2], [2, 3], [3, 0]];
+  
+  // Création de la forme de force
+  forcePoints = [
+    { x: 300, y: 400 },
+    { x: 400, y: 400 },
+    { x: 400, y: 500 },
+    { x: 300, y: 500 }
+  ];
+  forceLines = [[0, 1], [1, 2], [2, 3], [3, 0]];
+  
+}
+
+requestAnimationFrame(drawDiffusion);
 // Initial state save
 saveState();
 redraw();
 
-//la suite du projet est de rajouter des fleches de force dans les polygone de force les fleches leur seront donclié
+//la suite du projet est de rajouter des fleches de force dans les polygone de force les fleches leur seront donc lié
 //on pourras choisir le type de force (N, m/s, km/h ) et ca valeur
 //on choisit la direction de la force en tournant la fleche
 //par la suite, la simulation c'est :
