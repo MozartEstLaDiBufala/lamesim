@@ -2,14 +2,15 @@ const canvas = document.getElementById("canvas"); //pour lier le canvas de l'htm
 const ctx = canvas.getContext("2d"); // ctx est le contexte de dessin du canvas, il permet de dessiner des formes, du texte, etc.
 
 let arrows = []; //let signifie que la variable peut être modifiée, contrairement à const qui est une constante
-let lamePoints = [];
-let lameLines = [];
+let lamePoints = []; //{x: ..., y: ...} pour les points de lame
+let lameLines = []; // {start: ..., end: ...] }
 let lameShapeNbActuel = 0; // pour compter le nombre de formes de lame
 let lameShapeNbAncien = 0; // pour compter le nombre de formes de lame
 
 let forcePoints = [];
 let forceLines = [];
-let forceShapeNb = 0; // pour compter le nombre de formes de force
+let forceShapeNbActuel = 0; 
+let forceShapeNbAncien = 0; 
 
 let draggingPointIndexlame = null;
 let draggingShapelame = null;
@@ -45,8 +46,6 @@ let forceSources = []; // {pointIndex, strength}
 let tickCounter = 0;
 
 let contacts = []; // pour stocker les contacts entre les formes de lame et de force
-let forceSegments = []; // pour stocker les segments de force
-let lameSegments = []; // pour stocker les segments de lame
 
 function saveState() { //fonction pour sauvegarder l'état actuel du dessin
   // On utilise JSON.parse(JSON.stringify(...)) pour faire une copie profonde des tableaux
@@ -142,14 +141,19 @@ function resizeCanvas() {// Ajuste la taille du canvas à la fenêtre
 window.addEventListener("resize", resizeCanvas);// Écoute l'événement de redimensionnement de la fenêtre pour ajuster le canvas
 resizeCanvas();
 
+//Dessiner-----------------------------------------------------------------------------------------------------------------------------//
 function drawLameFormes() {
   const adjacency = {};// Crée un objet pour stocker les connexions entre les lamePoints
   for (let i = 0; i < lamePoints.length; i++) adjacency[i] = [];// Initialise un tableau pour chaque point
-  for (let [a, b] of lameLines) {// Pour chaque ligne, on ajoute les lamePoints aux connexions
+ 
+  let a, b
+  for (let i = 0; i < lameLines.length; i++) {
+    a = lameLines[i].start; // Récupère le point de départ de la ligne
+    b = lameLines[i].end; // Récupère le point d'arrivée de la ligne
     adjacency[a].push(b); //la fonction push ajoute un élément à la fin du tableau
     adjacency[b].push(a);
   }
-
+  
   function findCycle(start) {// Fonction pour trouver un cycle à partir d'un point de départ
     const path = [];// Chemin actuel du cycle
     const visited = new Set();// Ensemble pour suivre les lamePoints visités
@@ -196,20 +200,20 @@ function drawLameFormes() {
       }
       ctx.fill();
     }
-    if (lameShapeNbActuel > lameShapeNbAncien) {
+    if (lameShapeNbActuel > lameShapeNbAncien) {// Si le nombre de formes de lame a augmenté
       lameShapeNbAncien = lameShapeNbActuel; // Met à jour l'ancien nombre de formes de lame
       initializeMetalGraph(); // Initialisation du graphe métallique
-    } else if (lameShapeNbActuel < lameShapeNbAncien) {
+    } else if (lameShapeNbActuel < lameShapeNbAncien) {// Si le nombre de formes de lame a diminué
       lameShapeNbAncien = lameShapeNbActuel; // Met à jour l'ancien nombre de formes de lame
       metalGraph = [];
-    }
+      }
     //console.log('metalGraph', metalGraph);
   }
 
   // Tracer les lignes avec opacité réduite si survol en gomme
   ctx.strokeStyle = "#999";
   for (let i = 0; i < lameLines.length; i++) {
-    const [a, b] = lameLines[i];
+    const [a, b] = [lameLines[i].start,lameLines[i].end]; // Récupère les points de départ et d'arrivée de la ligne
     const p1 = lamePoints[a];
     const p2 = lamePoints[b];
     ctx.beginPath();
@@ -266,8 +270,10 @@ function drawLameFormes() {
 function drawForceFormes() {
   const adjacency = {};
   for (let i = 0; i < forcePoints.length; i++) adjacency[i] = [];
-  for (let [a, b] of forceLines) {
-    adjacency[a].push(b);
+  for (let i = 0; i < forceLines.length; i++) {
+    a = forceLines[i].start; // Récupère le point de départ de la ligne
+    b = forceLines[i].end; // Récupère le point d'arrivée de la ligne
+    adjacency[a].push(b); //la fonction push ajoute un élément à la fin du tableau
     adjacency[b].push(a);
   }
 
@@ -291,11 +297,11 @@ function drawForceFormes() {
   }
 
   const drawnCycles = new Set();// Ensemble pour éviter de dessiner plusieurs fois le même cycle
-  forceShapeNb = 0; // Réinitialise le compteur de formes de force
+  forceShapeNbActuel = 0; // Réinitialise le compteur de formes de force
   for (let i = 0; i < forcePoints.length; i++) {// Pour chaque point, on cherche un cycle
     const cycle = findCycle(i);// on utilise la fonction findCycle pour trouver les cycles
     if (cycle) {
-      forceShapeNb++;
+      forceShapeNbActuel++;
       const key = [...cycle].sort().join("-");
       if (drawnCycles.has(key)) continue;
       drawnCycles.add(key);
@@ -314,9 +320,9 @@ function drawForceFormes() {
       } else {
         ctx.fillStyle = "rgba(185, 13, 13, 0.37)";
       }
-
       //creation de la fleche au centre de la forme si elle n'existe pas deja
-      if (forceShapeNb > arrows.length) {
+      if (forceShapeNbActuel > forceShapeNbAncien) {
+        forceShapeNbAncien = forceShapeNbActuel; // Met à jour l'ancien nombre de formes de force
         // Calcul du centroïde du polygone
         let centerX = 0, centerY = 0;
         for (let idx of cycle) {
@@ -327,8 +333,9 @@ function drawForceFormes() {
         centerY /= cycle.length;
         
         arrows.push({ startX: centerX, startY: centerY, endX: centerX-50, endY: centerY });
+      } else if (forceShapeNbActuel < forceShapeNbAncien) {// Si le nombre de formes de force a diminué
+        forceShapeNbAncien = forceShapeNbActuel; // Met à jour l'ancien nombre de formes de force
       }
-
       ctx.fill();
     }
   }
@@ -336,7 +343,7 @@ function drawForceFormes() {
   // Tracer les lignes avec opacité réduite si survol en gomme
   ctx.strokeStyle = "rgba(145, 33, 33, 0.63)";
   for (let i = 0; i < forceLines.length; i++) {
-    const [a, b] = forceLines[i];
+    const [a, b] = [forceLines[i].start,forceLines[i].end]; // Récupère les points de départ et d'arrivée de la ligne
     const p1 = forcePoints[a];
     const p2 = forcePoints[b];
     ctx.beginPath();
@@ -387,8 +394,8 @@ function drawForceFormes() {
       ctx.fill();
     }
 
-    if (forceShapeNb < arrows.length) {
-        arrows.splice(forceShapeNb, arrows.length - forceShapeNb); // Supprime les flèches en trop
+    if (forceShapeNbActuel < arrows.length) {
+        arrows.splice(forceShapeNbActuel, arrows.length - forceShapeNbActuel); // Supprime les flèches en trop
     }
   }
 }
@@ -477,6 +484,7 @@ function drawDiffusion() {
     ctx.stroke();
     
   }
+  //console.log('Contacts détectés :', contacts);
   requestAnimationFrame(drawDiffusion); // Redessine à chaque frame pour l'animation
 }
 
@@ -527,8 +535,14 @@ function redraw() {
   drawForceFormes();
   arrows.forEach(drawArrow);
   drawButtons();
+  console.log('Points de lame:', lamePoints);
+  console.log('Lignes de lame:', lameLines);
+  console.log('Points de force:', forcePoints);
+  console.log('Lignes de force:', forceLines);
+  //console.log("Contacts détectés :", contacts);
 }
 
+//-----------------------------------------------------------------------------------------------------------------------------//
 function isPointInPolygon(px, py, polygonPoints) {
   let inside = false;
   for (let i = 0, j = polygonPoints.length - 1; i < polygonPoints.length; j = i++) {
@@ -595,6 +609,7 @@ function moveShape(shape, dx, dy) {
   redraw();
 }
 
+//-----------------------------------------------------------------------------------------------------------------------------//
 canvas.addEventListener("mousemove", (e) => {
   const rect = canvas.getBoundingClientRect();
   mouseX = e.clientX - rect.left;
@@ -643,7 +658,7 @@ canvas.addEventListener("mousemove", (e) => {
       // Survol ligne lame ?
       if (hoverPointIndexlame === null) {
         for (let i = 0; i < lameLines.length; i++) {
-          const [a, b] = lameLines[i];
+          const [a, b] = [lameLines[i].start, lameLines[i].end]; // Récupère les points de départ et d'arrivée de la ligne
           const p1 = lamePoints[a];
           const p2 = lamePoints[b];
           if (pointLineDistance(mouseX, mouseY, p1.x, p1.y, p2.x, p2.y) < 8) {
@@ -713,7 +728,7 @@ canvas.addEventListener("mousemove", (e) => {
       // Survol ligne force ?
       if (hoverPointIndexforce === null) {
         for (let i = 0; i < forceLines.length; i++) {
-          const [a, b] = forceLines[i];
+          const [a, b] = [forceLines[i].start, forceLines[i].end]; // Récupère les points de départ et d'arrivée de la ligne
           const p1 = forcePoints[a];
           const p2 = forcePoints[b];
           if (pointLineDistance(mouseX, mouseY, p1.x, p1.y, p2.x, p2.y) < 8) {
@@ -880,11 +895,9 @@ canvas.addEventListener("mousedown", (e) => {
       }
     }
 
-    
-
     if (subMode === "pointLame") { // Ajouter un point lame
       saveState();
-      lamePoints.push({ x: mx, y: my });
+      lamePoints.push({x: mx, y: my });
       redraw();
       return;
     }
@@ -903,9 +916,9 @@ canvas.addEventListener("mousedown", (e) => {
           lameTempline = { start: closePointIndex };
           redraw();
           return;
-        } else if (lameTraceStartIndex !== closePointIndex) {
+        } else if (lameTraceStartIndex !== closePointIndex &&  !lameLines.some(l => (l.start === lameTraceStartIndex && l.end === closePointIndex) || (l.start === closePointIndex && l.end === lameTraceStartIndex))) {// Vérifie que la ligne n'existe pas déjà
           saveState();
-          lameLines.push([lameTraceStartIndex, closePointIndex]);
+          lameLines.push({start: lameTraceStartIndex, end: closePointIndex});
           lameTempline = null;
           lameTraceStartIndex = null;
           redraw();
@@ -916,13 +929,13 @@ canvas.addEventListener("mousedown", (e) => {
 
     if (subMode === "pointForce") { // Ajouter un point force
       saveState();
-      forcePoints.push({ x: mx, y: my });
+      forcePoints.push({x: mx, y: my });
       redraw();
       return;
     }
     if (subMode === "lienForce") { // Tracer une ligne entre deux points force
       // Recherche point proche
-      let closePointIndex = null;
+      let closePointIndex = null; //
       for (let i = 0; i < forcePoints.length; i++) {
         if (Math.hypot(forcePoints[i].x - mx, forcePoints[i].y - my) < 15) {
           closePointIndex = i;
@@ -935,9 +948,9 @@ canvas.addEventListener("mousedown", (e) => {
           forceTempline = { start: closePointIndex };
           redraw();
           return;
-        } else if (forceTraceStartIndex !== closePointIndex) {
+        } else if (forceTraceStartIndex !== closePointIndex &&  !forceLines.some(l => (l.start === forceTraceStartIndex && l.end === closePointIndex) || (l.start === closePointIndex && l.end === forceTraceStartIndex))) {// Vérifie que la ligne n'existe pas déjà
           saveState();
-          forceLines.push([forceTraceStartIndex, closePointIndex]);
+          forceLines.push({start: forceTraceStartIndex, end: closePointIndex});
           forceTempline = null;
           forceTraceStartIndex = null;
           redraw();
@@ -1022,11 +1035,12 @@ canvas.addEventListener("mousedown", (e) => {
           lamePoints.splice(i, 1);
           // Supprimer lignes liées
           lameLines = lameLines.filter(l => l[0] !== i && l[1] !== i);
+          console.log("lameLines", lameLines);
           // Recalibrer indices des lignes
-          lameLines = lameLines.map(([a, b]) => [
-            a > i ? a - 1 : a,
-            b > i ? b - 1 : b
-          ]);
+          lameLines = lameLines.map(line => ({
+            start: line.start > i ? line.start - 1 : line.start,
+            end: line.end > i ? line.end - 1 : line.end
+          }));
           redraw();
           return;
         }
@@ -1038,11 +1052,12 @@ canvas.addEventListener("mousedown", (e) => {
           forcePoints.splice(i, 1);
           // Supprimer lignes liées
           forceLines = forceLines.filter(l => l[0] !== i && l[1] !== i);
+          forceLines = forceLines.filter(p => p !== forcePoints[i]); // Supprimer le point de force du segment
           // Recalibrer indices des lignes
-          forceLines = forceLines.map(([a, b]) => [
-            a > i ? a - 1 : a,
-            b > i ? b - 1 : b
-          ]);
+          forceLines = forceLines.map(line => ({
+            start: force.start > i ? force.start - 1 : force.start,
+            end: force.end > i ? force.end - 1 : force.end
+          }));
           redraw();
           return;
         }
@@ -1086,6 +1101,7 @@ canvas.addEventListener("mouseup", (e) => {
   //initializeMetalGraph(); // Initialisation du graphe métallique
 });
 
+//-----------------------------------------------------------------------------------------------------------------------------//
 function initializeMetalGraph() {
   metalGraph = lamePoints.map(() => ({
     neighbors: [],
@@ -1110,9 +1126,9 @@ function simulateDiffusionTick() {
   if (tickCounter < 60) return;
   tickCounter = 0;  
   //console.log('diffusion');
-  const contacts = detectContactsBetweenSegments(forceSegments, lameSegments, 1000);
+  const contacts = detectContactsBetweenSegments(forceLines, lameLines, 1000);
 
-  console.log("Contacts détectés :", contacts);
+  
   
   // 1. Mise à jour des intensités à partir des points de contact
   for (const pt of contacts) {
@@ -1127,8 +1143,10 @@ function simulateDiffusionTick() {
         nearestIndex = i;
       }
     }
-    console.log("b", nearestIndex)
+    //console.log("b", nearestIndex)
+    //console.log("metalgraph", metalGraph)
     if (nearestIndex !== -1) {
+      //
       metalGraph[nearestIndex].intensity += 1.0; // à moduler par l'angle ou autre
       
     }
@@ -1176,11 +1194,12 @@ function projectPointOnSegment(px, py, x1, y1, x2, y2) {
   };
 }
 
-function detectContactsBetweenSegments(forceSegments, lameSegments, seuil = 10) {
+function detectContactsBetweenSegments(forceLines, lameLines, seuil = 1000) {
   const contacts = [];
 
-  for (const fSeg of forceSegments) {
-    const [fP1, fP2] = fSeg;
+  for (const fSeg of forceLines) {
+    //console.log("fSeg", fSeg)
+    const [fP1, fP2] = [fSeg.at(0).x1y1, fSeg.at(0).x2y2];
 
     // Pour mieux détecter, on peut échantillonner plusieurs points le long du segment force
     const nbSamples = 5;
@@ -1191,21 +1210,22 @@ function detectContactsBetweenSegments(forceSegments, lameSegments, seuil = 10) 
         y: fP1.y + tSample * (fP2.y - fP1.y)
       };
 
-      for (const lSeg of lameSegments) {
-        const [lP1, lP2] = lSeg;
+      for (const lSeg of lameLines) {
+        const [lP1, lP2] = [lSeg.at(0).x1y1, lSeg.at(0).x2y2];
         const proj = projectPointOnSegment(samplePoint.x, samplePoint.y, lP1.x, lP1.y, lP2.x, lP2.y);
         const dist = Math.hypot(samplePoint.x - proj.x, samplePoint.y - proj.y);
-
+        console.log("dist", dist)
         if (dist < seuil) {
           contacts.push({ x: proj.x, y: proj.y });
         }
       }
     }
   }
-
+  console.log("Contacts détectés :", contacts);
   return contacts;
 }
 
+//-----------------------------------------------------------------------------------------------------------------------------//
 function creationInstant() {
   // Création de la forme de lame
   lamePoints = [
@@ -1227,10 +1247,11 @@ function creationInstant() {
   
 }
 
-requestAnimationFrame(drawDiffusion);
+
 // Initial state save
 saveState();
 redraw();
+//requestAnimationFrame(drawDiffusion);
 
 //la suite du projet est de rajouter des fleches de force dans les polygone de force les fleches leur seront donc lié
 //on pourras choisir le type de force (N, m/s, km/h ) et ca valeur
