@@ -1,14 +1,48 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <title>Simulateur de forces - Hache</title>
-  <link rel="stylesheet" href="style.css" />
+  <style>
+    canvas { border: 1px solid black; display: block; margin-top: 10px; }
+    .controls { margin: 10px 0; }
+    .controls button { margin: 2px; padding: 5px 10px; }
+    .active { background-color: #444; color: white; }
+  </style>
 </head>
 <body>
-  <h1>BladeSim</h1>
-  <canvas id="canvas"></canvas>
-  <script src="script.js"></script>
-  <input id="scaleInput" type="number" step="0.1" style="position: absolute; display: none; width: 40px;" />
+
+
+<div class="controls">
+  <b>Mode : </b>
+  <button onclick="setMode('lame')">🟦 Lame</button>
+  <button onclick="setMode('force')">🟥 Force</button>
+  <button onclick="setMode('erase')">🧽 Gomme</button>
+
+  <label style="margin-left: 20px;">Grille (px) : 
+    <input type="number" id="gridSizeInput" value="20" min="5" max="100" onchange="changeGridSize(this.value)">
+  </label>
+  <label style="margin-left: 20px;">Force (N) : 
+    <input type="number" id="forceInput" value="1000" min="0" onchange="changeForceNumb(this.value)">
+  </label>
+</div>
+
+<div class="controls">
+  <b>Direction Force :</b>
+  <button onclick="setDirection('up')">🔼</button>
+  <button onclick="setDirection('down')">🔽</button>
+  <button onclick="setDirection('left')">◀️</button>
+  <button onclick="setDirection('right')">▶️</button>
+  <button onclick="setDirection('up-left')">↖️</button>
+  <button onclick="setDirection('up-right')">↗️</button>
+  <button onclick="setDirection('down-left')">↙️</button>
+  <button onclick="setDirection('down-right')">↘️</button>
+</div>
+
+<canvas id="canvas"></canvas>
+
+<script src="script.js"></script>
+
 </body>
 </html>
+<!--<title>Simulateur de forces - Hache</title>
