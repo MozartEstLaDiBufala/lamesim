@@ -17,6 +17,9 @@ canvas {
   background: white;
   margin-top: 0px;
   cursor: pointer;
+  display: block;
+  width: 100vw;
+  height: 100vh;
 }
 
 #controls {
