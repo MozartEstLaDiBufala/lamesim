@@ -19,12 +19,13 @@
   <button onclick="setMode('force')">🟥 Force</button>
   <button onclick="setMode('erase')">🧽 Gomme</button>
 
-  <label style="margin-left: 20px;">Grille (px) : 
-    <input type="number" id="gridSizeInput" value="20" min="5" max="100" onchange="changeGridSize(this.value)">
+  <label style="margin-left: 20px;">Grille (px) :<input type="number" id="gridSizeInput" value="20" min="5" max="100" onchange="changeGridSize(this.value)">
   </label>
-  <label style="margin-left: 20px;">Force (N) : 
-    <input type="number" id="forceInput" value="1000" min="0" onchange="changeForceNumb(this.value)">
+  <label style="margin-left: 20px;">Taille pinceau :<input type="number" id="brushSizeInput" value="1" min="1" max="10" onchange="changeBrushSize(this.value)">
   </label>
+  <label style="margin-left: 20px;">Force (N) :<input type="number" id="forceInput" value="1000" min="0" onchange="changeForceNumb(this.value)">
+  </label>
+  
 </div>
 
 <div class="controls">
@@ -38,6 +39,22 @@
   <button onclick="setDirection('down-left')">↙️</button>
   <button onclick="setDirection('down-right')">↘️</button>
 </div>
+
+<div style="margin-top: 10px; display: flex; align-items: center; gap: 10px;">
+  <button onclick="tickSlider.value = Math.max(+tickSlider.value - 1, tickSlider.min); onTickChange(tickSlider.value)">←</button>
+
+  <label for="tickSlider">Temps (tick) :</label>
+  <input type="range" id="tickSlider" min="0" max="333" value="0" oninput="onTickChange(this.value)" style="flex-grow: 1;">
+  
+  <button onclick="tickSlider.value = Math.min(+tickSlider.value + 1, tickSlider.max); onTickChange(tickSlider.value)">→</button>
+  
+  <span id="tickLabel">0</span>
+</div>
+
+
+
+
+
 
 <canvas id="canvas"></canvas>
 
