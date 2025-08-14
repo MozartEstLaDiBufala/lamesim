@@ -2,36 +2,73 @@ body {
   font-family: sans-serif;
   background: #eee;
   text-align: center;
-  margin: 10px 15px;
-  padding: 0px;
 }
 
 h1 {
   margin-top: 0px;    /* réduit l’espace au-dessus du titre */
   margin-bottom: 0px;  /* réduit l’espace sous le titre */
   line-height: 1.1;    /* optionnel, rapproche les lignes si multi-lignes */
+  margin-left: 0px;
 }
 
 canvas {
   border: 2px solid #333;
   background: white;
-  margin-top: 0px;
-  cursor: pointer;
   display: block;
-  width: 100vw;
-  height: 100vh;
+  margin-top: 20px;
+  cursor: pointer;
+  position:relative; /* positionnement absolu par rapport à la fenêtre */
+  top: 0%;
+  left: 50%;
+  transform: translate(-50%, -0%); /* décale le body pour le centrer */
+
 }
 
-#controls {
-  margin-bottom: 10px;
+/* Conteneur des contrôles */
+.controls {
+  margin: 5px 0;
 }
 
-#trash {
-  display: inline-block;
-  font-size: 24px;
-  margin-left: 20px;
-  background: #fdd;
+/* Boutons dans les contrôles */
+.controls button {
+  margin: 2px;
   padding: 5px 10px;
-  border: 2px solid #900;
-  border-radius: 6px;
 }
+
+/* Bouton actif */
+.active {
+  background-color: #444;
+  color: white;
+}
+
+#forceGradientContainer {
+  height: 20px;
+  margin: 5px 0;
+}
+
+#forceGradient {
+  width: 100%; /* occupe toute la largeur dispo */
+  height: 100%;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: linear-gradient(
+    to right,
+    rgb(200, 200, 200),     /* 0% = force faible */
+    red       /* 100% = force max */
+  );
+}
+
+#forceLabels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+input[type="number"] {
+  width: 7ch;       /* largeur basée sur le nombre de caractères */
+  max-width: 100%;   /* ne dépasse pas le parent */
+}
+/*.active   cherche tous les elements qui on class="active"*/
+/*#active   cherche un seul element (unique) qui a l'id="active"*/
+/*active    cherche les balises <active>*/
