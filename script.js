@@ -21,12 +21,14 @@ let simulationFramesForce = [[]]; // Liste des listes forcePoints dans le temps
 let simulationFramesLame = [[]]; // Liste des listes lamePoints dans le temps
 
 
-canvas.addEventListener('mousedown', () => {isMouseDown = true; redraw(firstTick = true)});
-canvas.addEventListener('mouseup', () => {isMouseDown = false; generateDiffusionFrames(forcePoints, lamePoints);  redraw();});
+canvas.addEventListener('mousedown', () => isMouseDown = true);
+canvas.addEventListener('mouseup', () => isMouseDown = false);
 canvas.addEventListener('mouseleave', () => isMouseDown = false);
 canvas.addEventListener('mousemove', drawPoint);
 canvas.addEventListener('click', drawPoint);
 const slider = document.getElementById("tickSlider");
+
+//generateDiffusionFrames(forcePoints, lamePoints);  redraw();}
 
 let forceDirection = "right";  // Direction choisie par l'utilisateur
 let pixelForceHasCollided = false;       // Devient true dès qu’on touche la lame
@@ -109,6 +111,9 @@ function drawPoint(e) {
     removePoint(lamePoints, x, y);
     removePoint(forcePoints, x, y);
   }
+
+  generateDiffusionFrames(forcePoints, lamePoints);
+  redraw();
 }
 
 slider.addEventListener("input", () => {
@@ -148,28 +153,9 @@ function getForceColor(force, maxForce) {
   return `rgb(${r},${g},${b})`;
 }
 
-function redraw(firstTick = false) {
+function redraw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   drawGrid();
-
-  if (firstTick) {
-  // Points de la lame (diffusion)
-  if (lamePoints) {
-    for (const p of lamePoints) {
-      // Intensité entre 0 et 1, max = 3*forceNumb
-      const color = getForceColor(p.force,forceNumbMax);
-      drawCell(p.x, p.y, color);
-    }
-  }
-
-  // Points de force (sources)
-  if (forcePoints) {
-    for (const p of forcePoints) {
-      drawCell(p.x, p.y, 'red');
-      drawForceArrow(p.x, p.y, dirVecfx, dirVecfy);
-    }
-  }
-  }
 
   // Points de la lame (diffusion)
   if (simulationFramesLame[tick]) {
@@ -296,7 +282,7 @@ function updateForceGradientLabels(forceMax) {
 
 //------------------------------------------------//
 
-function generateDiffusionFrames(forcePoints, lamePoints, maxTicks = 333) {
+function generateDiffusionFrames(forcePoints, lamePoints) {
   const framesLame = [];
   const framesForce = [];
 
