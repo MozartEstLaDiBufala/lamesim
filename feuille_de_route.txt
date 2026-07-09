@@ -1,0 +1,24 @@
+4. Feuille de route vers la simulation physique
+Pour atteindre une modélisation réaliste, le développement doit suivre un ordre chronologique strict, chaque étape validant la précédente.
+
+Étape 1 : Implémentation de la communication API (Client-Serveur)
+Objectif : Créer un point de terminaison HTTP en Python (dans main.py avec FastAPI) capable de recevoir des requêtes POST.
+Action : Modifier script.js pour qu'il extraie les tableaux points, triangles et les vecteurs de force arrows, les sérialise en JSON, et les transmette au serveur via la fonction fetch().
+
+
+Étape 2 : Pré-traitement mathématique (Python)
+Objectif : Réceptionner le JSON côté serveur et convertir les coordonnées géométriques en structures de données exploitables par la physique matricielle (tableaux numpy).
+
+
+Étape 3 : Solveur d'élasticité linéaire (Validation de concept)
+Objectif : Avant de simuler la coupe ou la rupture (qui requiert des calculs non-linéaires complexes), implémenter un calcul de base des contraintes élastiques (Loi de Hooke).
+Action : Calculer le déplacement des nœuds en fonction de la force appliquée et renvoyer un tableau de valeurs (les contraintes) au navigateur.
+
+
+Étape 4 : Post-traitement visuel (JavaScript)
+Objectif : Réceptionner la réponse du serveur et mettre à jour le canvas.
+Action : Assigner une couleur à chaque triangle dans la fonction drawTriangles() en fonction de la contrainte reçue (création d'une cartographie colorimétrique des efforts).
+
+
+Étape 5 : Mécanique non-linéaire et endommagement (Le réalisme)
+Objectif : Intégrer un solveur FEA avancé (comme CalculiX ou un module Python spécialisé) pour calculer la limite de rupture et la séparation de la matière au point d'impact.
