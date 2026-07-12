@@ -1,0 +1,31 @@
+# =========================
+# Environnements Python
+# =========================
+# Exclut l'environnement virtuel généré par uv
+.venv/
+env/
+venv/
+
+# =========================
+# Fichiers compilés et cache Python
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# =========================
+# Outils de distribution Python
+# =========================
+*.egg-info/
+dist/
+build/
+
+# =========================
+# Fichiers de configuration locaux
+# =========================
+# Pour exclure les variables d'environnement locales (si vous utilisez un .env plus tard)
+.env
+
+# Fichiers générés par les systèmes d'exploitation
+.DS_Store
+Thumbs.db
