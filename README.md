@@ -25,7 +25,7 @@ LameSim is an interactive computational mechanics tool designed to model the str
 
 ---
 
-## Data Architecture
+## git Data Architecture
 
 The system serializes the geometric mesh and boundary conditions from the JavaScript frontend and transmits them to the Python backend for matrix computation.
 
@@ -47,3 +47,76 @@ The system serializes the geometric mesh and boundary conditions from the JavaSc
     "poisson_ratio": 0.3
   }
 }
+
+```
+
+### Mathematical Model
+
+The Python solver calculates the nodal displacement vector $U$ by solving the generalized Hooke's law matrix equation:
+
+
+$$K \cdot U = F$$
+
+
+Where $K$ is the global stiffness matrix derived from the `triangles` array, and $F$ is the force vector derived from the `arrows` array.
+
+---
+
+## Technical Stack
+
+**Frontend (Client):**
+
+* **HTML5 / CSS3:** Interface structure and styling.
+
+
+* **Vanilla JavaScript:** Event handling, state management (Undo/Redo), and Canvas API rendering.
+
+
+
+**Backend (Server / Solver):**
+
+* **Python:** Core mathematical logic.
+* **uv:** Modern, fast Python package and environment manager.
+* **FastAPI / Uvicorn:** High-performance REST API framework to handle solver requests.
+* **NumPy / SciPy:** Advanced linear algebra computation for the FEM stiffness matrices.
+
+---
+
+## Installation & Setup
+
+1. **Clone the repository:**
+```bash
+git clone https://github.com/MozartEstLaDiBufala/lamesim.git
+cd lamesim
+```
+
+
+2. **Initialize the Python Environment:**
+Ensure `uv` is installed on your system.
+```bash
+uv sync
+```
+
+
+3. **Run the Backend Server:**
+```bash
+uv run uvicorn backend.main:app --reload
+```
+
+
+4. **Launch the Frontend:**
+Open `frontend/index.html` in any modern web browser or use a local live server.
+
+
+
+---
+
+## Roadmap
+
+* [x] Phase 1: Vectorial meshing interface (Points, Triangles, Vectors).
+
+
+* [ ] Phase 2: REST API implementation for Client-Server data serialization.
+* [ ] Phase 3: Python linear elasticity solver implementation (Hooke's law).
+* [ ] Phase 4: Dynamic post-processing (rendering stress heatmaps on the JS Canvas).
+* [ ] Phase 5: Integration of non-linear mechanics (plasticity and material rupture).
