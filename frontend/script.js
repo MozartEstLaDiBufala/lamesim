@@ -1,8 +1,9 @@
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 
-// --- Modèle de données ---
+// --- Modèle de données factorisé ---
 const blade = {
+  type: "blade",
   contour: [],
   isClosed: false,
   mesh: { vertices: [], triangles: [] },
@@ -10,9 +11,17 @@ const blade = {
   kinematics: { velocity: null }
 };
 
+const obstacle = {
+  type: "obstacle",
+  contour: [],
+  isClosed: false,
+  mesh: { vertices: [], triangles: [] },
+  physics: { centroid: { x: 0, y: 0 }, area: 0, mass: 0 }
+};
+
 const appState = {
-  mode: "draw",
-  showMesh: true,
+  mode: "draw_blade", // "draw_blade", "draw_obstacle", "simulation"
+  showMeshLines: true,
   draggingVelocity: false
 };
 
@@ -77,134 +86,178 @@ function syncVelocityFromInputs() {
 }
 
 // --- Algorithme de Maillage et Physique ---
-function generateMesh() {
-  if (blade.contour.length < 3) return;
+function generateMesh(target) {
+  if (target.contour.length < 3) return;
 
-  // 1. Préparation des coordonnées pour Earcut
   const flatCoords = [];
-  blade.contour.forEach(p => {
+  target.contour.forEach(p => {
     flatCoords.push(p.x, p.y);
   });
 
-  // 2. Génération du maillage
   const trianglesIndices = earcut(flatCoords);
-  blade.mesh.vertices = [...blade.contour];
-  blade.mesh.triangles = [];
+  target.mesh.vertices = [...target.contour];
+  target.mesh.triangles = [];
   
   for (let i = 0; i < trianglesIndices.length; i += 3) {
-    blade.mesh.triangles.push([
+    target.mesh.triangles.push([
       trianglesIndices[i],
       trianglesIndices[i+1],
       trianglesIndices[i+2]
     ]);
   }
 
-  // 3. Calculs physiques automatiques post-maillage
-  const centroidData = calculateCentroid(blade.contour);
-  blade.physics.centroid = { x: centroidData.x, y: centroidData.y };
-  blade.physics.area = centroidData.area;
+  const centroidData = calculateCentroid(target.contour);
+  target.physics.centroid = { x: centroidData.x, y: centroidData.y };
+  target.physics.area = centroidData.area;
 
-  // 4. Initialisation du vecteur vitesse au centre de gravité
-  blade.kinematics.velocity = {
-    startX: blade.physics.centroid.x,
-    startY: blade.physics.centroid.y,
-    endX: blade.physics.centroid.x,
-    endY: blade.physics.centroid.y + 100 // Vecteur arbitraire pointant vers le bas
-  };
+  // L'initialisation du vecteur cinématique est strictement réservée à la lame
+  if (target.type === "blade") {
+    target.kinematics.velocity = {
+      startX: target.physics.centroid.x,
+      startY: target.physics.centroid.y,
+      endX: target.physics.centroid.x,
+      endY: target.physics.centroid.y + 100 
+    };
+    syncVelocityInputs();
+  }
 
   redraw();
 }
 
-// --- Événements Souris ---
+// --- Événements Interface (Champs Numériques) ---
+document.getElementById("input-vx")?.addEventListener("input", syncVelocityFromInputs);
+document.getElementById("input-vy")?.addEventListener("input", syncVelocityFromInputs);
+
+// --- Événements Souris (Interaction Canvas) ---
 canvas.addEventListener("mousedown", e => {
   const rect = canvas.getBoundingClientRect();
   const mx = e.clientX - rect.left;
   const my = e.clientY - rect.top;
 
-  if (appState.mode === "draw" && !blade.isClosed) {
-    if (blade.contour.length > 2 && distance(mx, my, blade.contour[0].x, blade.contour[0].y) < 15) {
-      blade.isClosed = true;
-      generateMesh();
-    } else {
-      blade.contour.push({ x: mx, y: my });
-      redraw();
+  if (blade.isClosed && blade.kinematics.velocity) {
+    const v = blade.kinematics.velocity;
+    if (distance(mx, my, v.endX, v.endY) < 15) {
+      appState.draggingVelocity = true;
+      return; 
     }
   }
+
+  // Aiguillage du tracé selon le mode actif
+  if (appState.mode === "draw_blade" || appState.mode === "draw_obstacle") {
+    const target = appState.mode === "draw_blade" ? blade : obstacle;
+    
+    if (!target.isClosed) {
+      if (target.contour.length > 2 && distance(mx, my, target.contour[0].x, target.contour[0].y) < 15) {
+        target.isClosed = true;
+        generateMesh(target); // Maillage automatique à la fermeture
+      } else {
+        target.contour.push({ x: mx, y: my });
+        redraw();
+      }
+    }
+  }
+});
+
+canvas.addEventListener("mousemove", e => {
+  // 3. Logique de déplacement de la flèche
+  if (appState.draggingVelocity && blade.kinematics.velocity) {
+    const rect = canvas.getBoundingClientRect();
+    blade.kinematics.velocity.endX = e.clientX - rect.left;
+    blade.kinematics.velocity.endY = e.clientY - rect.top;
+    syncVelocityInputs(); // Met à jour le panneau latéral en temps réel
+    redraw();
+  }
+});
+
+window.addEventListener("mouseup", () => {
+  // 4. Relâchement de toute action de glissement
+  appState.draggingVelocity = false;
 });
 
 // --- Événements Interface (Boutons) ---
-document.getElementById("btn-draw")?.addEventListener("click", () => { appState.mode = "draw"; redraw(); });
+// --- Événements Interface (Boutons) ---
+document.getElementById("btn-draw-blade")?.addEventListener("click", () => { appState.mode = "draw_blade"; });
+document.getElementById("btn-draw-obs")?.addEventListener("click", () => { appState.mode = "draw_obstacle"; });
 document.getElementById("btn-toggle-mesh")?.addEventListener("click", () => {
-  appState.showMesh = !appState.showMesh;
+  appState.showMeshLines = !appState.showMeshLines;
   redraw();
 });
-document.getElementById("btn-mesh")?.addEventListener("click", () => {
-  if (blade.contour.length < 3) {
-    alert("Placez au moins 3 points pour former une géométrie valide.");
-    return;
-  }
-  blade.isClosed = true;
-  generateMesh();
-});
+document.getElementById("btn-sim")?.addEventListener("click", () => { appState.mode = "simulation"; });
 
-document.getElementById("btn-calc-mass")?.addEventListener("click", () => {
-  if (blade.physics.area === 0) {
-    alert("Veuillez d'abord tracer et mailler la géométrie de la lame.");
-    return;
-  }
-  const RHO_STEEL = 7850;
-  const PIXEL_TO_METER = 0.001;
-  const THICKNESS_M = 0.005;
-  const areaSqMeters = blade.physics.area * Math.pow(PIXEL_TO_METER, 2);
-  blade.physics.mass = RHO_STEEL * areaSqMeters * THICKNESS_M;
+
+// document.getElementById("btn-calc-mass")?.addEventListener("click", () => {
+//   if (blade.physics.area === 0) {
+//     alert("Veuillez d'abord tracer et mailler la géométrie de la lame.");
+//     return;
+//   }
+//   const RHO_STEEL = 7850;
+//   const PIXEL_TO_METER = 0.001;
+//   const THICKNESS_M = 0.005;
+//   const areaSqMeters = blade.physics.area * Math.pow(PIXEL_TO_METER, 2);
+//   blade.physics.mass = RHO_STEEL * areaSqMeters * THICKNESS_M;
   
-  const massInput = document.getElementById("input-mass");
-  if (massInput) massInput.value = blade.physics.mass.toFixed(2);
-});
+//   const massInput = document.getElementById("input-mass");
+//   if (massInput) massInput.value = blade.physics.mass.toFixed(2);
+// });
 
 // --- Moteur de Rendu Visuel ---
+// --- Moteur de Rendu Visuel ---
+function drawEntity(target) {
+  // 1. Dessin du périmètre
+  if (target.contour.length > 0) {
+    ctx.strokeStyle = target.type === "blade" ? "#333" : "#004085";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(target.contour[0].x, target.contour[0].y);
+    for (let i = 1; i < target.contour.length; i++) {
+      ctx.lineTo(target.contour[i].x, target.contour[i].y);
+    }
+    if (target.isClosed) ctx.closePath();
+    ctx.stroke();
+    
+    // Dissimulation des nœuds de contrôle une fois la géométrie fermée
+    if (!target.isClosed) {
+      ctx.fillStyle = target.type === "blade" ? "blue" : "darkcyan";
+      target.contour.forEach(p => {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    }
+  }
+
+  // 2. Dessin du maillage continu (Base pour la Heatmap)
+  if (target.isClosed && target.mesh.triangles.length > 0) {
+    target.mesh.triangles.forEach(tri => {
+      // Tons chauds/neutres pour la lame, tons froids pour la bûche
+      ctx.fillStyle = target.type === "blade" ? "rgba(180, 180, 180, 0.7)" : "rgba(173, 216, 230, 0.7)";
+      
+      ctx.beginPath();
+      ctx.moveTo(target.mesh.vertices[tri[0]].x, target.mesh.vertices[tri[0]].y);
+      ctx.lineTo(target.mesh.vertices[tri[1]].x, target.mesh.vertices[tri[1]].y);
+      ctx.lineTo(target.mesh.vertices[tri[2]].x, target.mesh.vertices[tri[2]].y);
+      ctx.closePath();
+      
+      ctx.fill(); // Le remplissage gris/bleu est permanent
+      
+      // Les traits géométriques sont conditionnels
+      if (appState.showMeshLines) {
+        ctx.strokeStyle = target.type === "blade" ? "#999" : "#87CEFA";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+    });
+  }
+}
+
 function redraw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // 1. Dessin du périmètre
-  if (blade.contour.length > 0) {
-    ctx.strokeStyle = "#333";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(blade.contour[0].x, blade.contour[0].y);
-    for (let i = 1; i < blade.contour.length; i++) {
-      ctx.lineTo(blade.contour[i].x, blade.contour[i].y);
-    }
-    if (blade.isClosed) ctx.closePath();
-    ctx.stroke();
-    
-    ctx.fillStyle = "blue";
-    blade.contour.forEach(p => {
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
-      ctx.fill();
-    });
-  }
+  // Exécution du rendu pour les entités actives
+  drawEntity(blade);
+  drawEntity(obstacle);
 
-  // 2. Dessin du maillage
-  if (appState.showMesh && blade.isClosed && blade.mesh.triangles.length > 0) {
-    blade.mesh.triangles.forEach(tri => {
-      ctx.fillStyle = "rgba(150, 150, 150, 0.5)";
-      ctx.strokeStyle = "#999";
-      ctx.lineWidth = 1;
-      
-      ctx.beginPath();
-      ctx.moveTo(blade.mesh.vertices[tri[0]].x, blade.mesh.vertices[tri[0]].y);
-      ctx.lineTo(blade.mesh.vertices[tri[1]].x, blade.mesh.vertices[tri[1]].y);
-      ctx.lineTo(blade.mesh.vertices[tri[2]].x, blade.mesh.vertices[tri[2]].y);
-      ctx.closePath();
-      
-      ctx.fill();
-      ctx.stroke();
-    });
-  }
-
-  // 3. Dessin du vecteur de vitesse cinématique
+  // 3. Dessin du vecteur de vitesse cinématique (spécifique à la lame)
   if (blade.isClosed && blade.kinematics.velocity) {
     const v = blade.kinematics.velocity;
     ctx.strokeStyle = "red";
@@ -214,7 +267,6 @@ function redraw() {
     ctx.lineTo(v.endX, v.endY);
     ctx.stroke();
 
-    // Pointe de la flèche
     const angle = Math.atan2(v.endY - v.startY, v.endX - v.startX);
     ctx.beginPath();
     ctx.moveTo(v.endX, v.endY);
