@@ -72,3 +72,50 @@ input[type="number"] {
 /*.active   cherche tous les elements qui on class="active"*/
 /*#active   cherche un seul element (unique) qui a l'id="active"*/
 /*active    cherche les balises <active>*/
+
+/* --- Architecture Flexbox --- */
+#main-container {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 15px;
+  margin: 10px auto;
+  max-width: 98vw;
+}
+
+#info-panel {
+  width: 250px;
+  background: #f8f9fa;
+  border: 1px solid #ccc;
+  padding: 15px;
+  border-radius: 5px;
+  text-align: left;
+  /* Permet au panneau de défiler si le tableau devient trop long */
+  max-height: 80vh;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+#canvas-container {
+  flex-grow: 1; /* Remplit l'espace restant */
+  min-width: 0; /* Évite les débordements Flexbox */
+}
+
+/* --- Style du tableau de données --- */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 10px;
+}
+
+th, td {
+  border: 1px solid #ddd;
+  padding: 6px;
+  text-align: center;
+  font-size: 13px;
+}
+
+th {
+  background-color: #e9ecef;
+}
