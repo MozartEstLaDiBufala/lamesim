@@ -1,30 +1,34 @@
-Feuille de route vers la simulation physique
+cd C:\Users\1moza\Desktop\Projet\Simu_lame\lamesim
+.venv\Scripts\activate
+uv add fastapi uvicorn pydantic
+uv run uvicorn backend.main:app --reload
 
-Phase 1 :  Objectif : Permettre le tracé d'un contour continu fermé, puis déléguer le découpage interne à l'ordinateur.Action (JavaScript) :Modifier les événements de la souris dans script.js pour stocker une liste ordonnée de points formant un polygone (le contour de la lame).  Intégrer une bibliothèque de triangulation en JavaScript (ex: Earcut). Cette fonction prendra votre polygone en entrée et écrasera vos tableaux points et triangles avec un maillage valide, sans intervention manuelle.  Livrable : Vous dessinez un contour, vous cliquez sur "Mailler", et la forme se remplit de triangles gris.
+Feuille de route : Simulateur Mécanique (BladeSim)
 
-Phase 2 : Le pipeline de données et le solveur "Factice" (Mock API)Plutôt que d'attendre d'avoir codé la loi de Hooke pour tester la communication client-serveur, nous allons utiliser un modèle mathématique trivial d'atténuation radiale.Objectif : Valider la sérialisation JSON, l'envoi via fetch(), la réception par FastAPI, et le retour des données, sans la complexité de l'algèbre linéaire.Action (Python) :Créer la route POST dans FastAPI qui réceptionne les sommets, les triangles et les vecteurs de force.Au lieu de calculer une matrice de rigidité, implémenter une boucle simple : pour chaque triangle, calculer sa distance $d$ par rapport à la pointe de la flèche de force.Assigner une contrainte arbitraire inversement proportionnelle à la distance, par exemple $\sigma = \frac{F}{d^2 + 1}$.Renvoyer au navigateur un tableau JSON contenant une valeur scalaire de contrainte pour chaque index de triangle.
+Jalon 1 : Géométrie et Interface
+Objectif : Générer les données d'entrée.
+Actions : Tracé vectoriel de la lame et de l'obstacle, maillage automatique (triangulation de Delaunay via Earcut), et calcul des paramètres initiaux (masse, barycentre, vecteur cinématique).
 
-Phase 3 : L'interpolation visuelle (La Heatmap)Le navigateur doit interpréter la réponse numérique du serveur "factice" pour modifier le rendu graphique.Objectif : Remplacer le remplissage statique (ctx.fillStyle = "#999";) des triangles par une échelle colorimétrique dynamique.  Action (JavaScript) :Réceptionner le tableau des contraintes renvoyé par l'API.Normaliser ces valeurs (trouver la contrainte maximale pour fixer le plafond à 100%).Dans votre fonction drawTriangles(), interpoler une couleur pour chaque élément : les triangles avec une contrainte proche de 0 restent bleus/gris, et ceux subissant une forte contrainte basculent vers le jaune puis le rouge.  Livrable (Le PoC validé) : Vous dessinez une lame, vous placez une flèche de 1000 N sur le tranchant, vous lancez la simulation, et une zone rouge apparaît autour du point d'impact, s'atténuant progressivement dans le reste de la lame.
+Jalon 2 : Proof of Concept (PoC) de l'Architecture Client-Serveur
+Objectif : Valider le pipeline de données sans bloquer sur la physique complexe.
+Actions (JS) : Sérialisation des géométries (points, triangles, vitesse) en JSON et envoi via fetch().
+Actions (Python) : Création du point de terminaison HTTP (FastAPI). 
+Implémentation d'un solveur "factice" calculant une contrainte arbitraire via atténuation radiale : sigma = (F) / (d^2 + 1).
+Rendu (JS) : Réception du tableau de valeurs et génération d'une heatmap basique interpolant les couleurs des triangles selon leur contrainte.
 
+Jalon 3 : Physique Linéaire (Élasticité)
+Objectif : Remplacer le PoC par un véritable modèle mécanique (Loi de Hooke).
+Actions (Python) : Conversion du JSON en matrices NumPy. 
+Assemblage de la matrice de rigidité globale. 
+Calcul des déplacements nodaux et des contraintes réelles (Von Mises) avant déformation permanente.
 
-Étape 1 : Implémentation de la communication API (Client-Serveur)
-Objectif : Créer un point de terminaison HTTP en Python (dans main.py avec FastAPI) capable de recevoir des requêtes POST.
-Action : Modifier script.js pour qu'il extraie les tableaux points, triangles et les vecteurs de force arrows, les sérialise en JSON, et les transmette au serveur via la fonction fetch().
+Jalon 4 : Physique Non-Linéaire (Réalisme et Coupe)
+Objectif : Simuler la déformation plastique et la rupture de la matière.
+Actions (Python) : Intégration d'un solveur FEA externe (ex: CalculiX) via l'API pour gérer les grands déplacements et la séparation des mailles (Element Deletion ou XFEM) lors de l'impact entre la lame et la bûche.
 
-
-Étape 2 : Pré-traitement mathématique (Python)
-Objectif : Réceptionner le JSON côté serveur et convertir les coordonnées géométriques en structures de données exploitables par la physique matricielle (tableaux numpy).
-
-
-Étape 3 : Solveur d'élasticité linéaire (Validation de concept)
-Objectif : Avant de simuler la coupe ou la rupture (qui requiert des calculs non-linéaires complexes), implémenter un calcul de base des contraintes élastiques (Loi de Hooke).
-Action : Calculer le déplacement des nœuds en fonction de la force appliquée et renvoyer un tableau de valeurs (les contraintes) au navigateur.
-
-
-Étape 4 : Post-traitement visuel (JavaScript)
-Objectif : Réceptionner la réponse du serveur et mettre à jour le canvas.
-Action : Assigner une couleur à chaque triangle dans la fonction drawTriangles() en fonction de la contrainte reçue (création d'une cartographie colorimétrique des efforts).
-
-
-Étape 5 : Mécanique non-linéaire et endommagement (Le réalisme)
-Objectif : Intégrer un solveur FEA avancé (comme CalculiX ou un module Python spécialisé) pour calculer la limite de rupture et la séparation de la matière au point d'impact.
+Jalon 5 : Finalisation et Rendu du Projet (Déploiement)
+Objectif : Consolider l'application pour une utilisation en production ou présentation.
+Optimisation des performances : Minification du code JavaScript, gestion asynchrone des temps de chargement pendant les calculs du solveur (ajout d'un indicateur de chargement UI).
+Raffinement de l'interface (UI/UX) : Standardisation des contrôles (panneau latéral), ajout de légendes pour la heatmap (échelle de valeurs en MPa), et gestion des erreurs (alertes si le maillage est invalide ou le serveur hors ligne).
+Documentation technique : Rédaction d'un fichier README.md exhaustif expliquant les hypothèses mathématiques utilisées, l'architecture API, et les instructions de déploiement.
+Déploiement : Hébergement du frontend (ex: GitHub Pages, Vercel) et du backend Python (ex: Render, Heroku) pour rendre le simulateur accessible publiquement.

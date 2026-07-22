@@ -7,7 +7,7 @@ const blade = {
   contour: [],
   isClosed: false,
   mesh: { vertices: [], triangles: [] },
-  physics: { centroid: { x: 0, y: 0 }, area: 0, mass: 1.0 },
+  physics: { centroid: { x: 0, y: 0 }, area: 0, mass: 1.0, stresses: [] },
   kinematics: { velocity: null }
 };
 
@@ -175,32 +175,14 @@ window.addEventListener("mouseup", () => {
 });
 
 // --- Événements Interface (Boutons) ---
-// --- Événements Interface (Boutons) ---
 document.getElementById("btn-draw-blade")?.addEventListener("click", () => { appState.mode = "draw_blade"; });
 document.getElementById("btn-draw-obs")?.addEventListener("click", () => { appState.mode = "draw_obstacle"; });
 document.getElementById("btn-toggle-mesh")?.addEventListener("click", () => {
   appState.showMeshLines = !appState.showMeshLines;
   redraw();
 });
-document.getElementById("btn-sim")?.addEventListener("click", () => { appState.mode = "simulation"; });
+document.getElementById("btn-sim")?.addEventListener("click", runSimulation);
 
-
-// document.getElementById("btn-calc-mass")?.addEventListener("click", () => {
-//   if (blade.physics.area === 0) {
-//     alert("Veuillez d'abord tracer et mailler la géométrie de la lame.");
-//     return;
-//   }
-//   const RHO_STEEL = 7850;
-//   const PIXEL_TO_METER = 0.001;
-//   const THICKNESS_M = 0.005;
-//   const areaSqMeters = blade.physics.area * Math.pow(PIXEL_TO_METER, 2);
-//   blade.physics.mass = RHO_STEEL * areaSqMeters * THICKNESS_M;
-  
-//   const massInput = document.getElementById("input-mass");
-//   if (massInput) massInput.value = blade.physics.mass.toFixed(2);
-// });
-
-// --- Moteur de Rendu Visuel ---
 // --- Moteur de Rendu Visuel ---
 function drawEntity(target) {
   // 1. Dessin du périmètre
@@ -228,19 +210,33 @@ function drawEntity(target) {
 
   // 2. Dessin du maillage continu (Base pour la Heatmap)
   if (target.isClosed && target.mesh.triangles.length > 0) {
-    target.mesh.triangles.forEach(tri => {
-      // Tons chauds/neutres pour la lame, tons froids pour la bûche
-      ctx.fillStyle = target.type === "blade" ? "rgba(180, 180, 180, 0.7)" : "rgba(173, 216, 230, 0.7)";
+    
+    // Détermination de la contrainte maximale si des résultats existent
+    let maxStress = 0;
+    const hasStresses = appState.mode === "simulation" && target.physics.stresses && target.physics.stresses.length === target.mesh.triangles.length;
+    
+    if (hasStresses) {
+      maxStress = Math.max(...target.physics.stresses);
+    }
+
+    // Il faut récupérer l'index (triIndex) pour associer le triangle à sa contrainte
+    target.mesh.triangles.forEach((tri, triIndex) => {
       
+      let fillColor = target.type === "blade" ? "rgba(180, 180, 180, 0.7)" : "rgba(173, 216, 230, 0.7)";
+      
+      // Application de la couleur interpolée si les données sont valides
+      if (hasStresses) {
+        fillColor = getStressColor(target.physics.stresses[triIndex], maxStress, target.type);
+      }
+      
+      ctx.fillStyle = fillColor;
       ctx.beginPath();
       ctx.moveTo(target.mesh.vertices[tri[0]].x, target.mesh.vertices[tri[0]].y);
       ctx.lineTo(target.mesh.vertices[tri[1]].x, target.mesh.vertices[tri[1]].y);
       ctx.lineTo(target.mesh.vertices[tri[2]].x, target.mesh.vertices[tri[2]].y);
       ctx.closePath();
+      ctx.fill(); 
       
-      ctx.fill(); // Le remplissage gris/bleu est permanent
-      
-      // Les traits géométriques sont conditionnels
       if (appState.showMeshLines) {
         ctx.strokeStyle = target.type === "blade" ? "#999" : "#87CEFA";
         ctx.lineWidth = 1;
@@ -279,29 +275,148 @@ function redraw() {
   updateDataPanel();
 }
 
-function updateDataPanel() {
-  const dataContent = document.getElementById("data-content");
-  if (!dataContent) return;
-  
-  if (blade.contour.length === 0) {
-    dataContent.innerHTML = "<p>Aucun point tracé.</p>";
-    return;
+// --- Génération de l'interface des données ---
+function generateEntityTable(entity, title) {
+  if (entity.contour.length === 0) {
+    return `
+      <div style="margin-bottom: 15px;">
+        <h4 style="margin: 0 0 5px 0; color: #333;">${title}</h4>
+        <p style="font-size: 13px; color: #666;">Aucun point tracé.</p>
+      </div>
+    `;
   }
 
   let html = `
-    <p><strong>Statut:</strong> ${blade.isClosed ? "Géométrie fermée" : "En cours de tracé"}</p>
-    <p><strong>Triangles:</strong> ${blade.mesh.triangles.length}</p>
-    <table>
-      <thead>
-        <tr><th>Nœud</th><th>X (px)</th><th>Y (px)</th></tr>
-      </thead>
-      <tbody>
+    <div style="margin-bottom: 15px;">
+      <h4 style="margin: 0 0 5px 0; color: #333;">${title}</h4>
+      <p style="font-size: 13px; margin: 2px 0;"><strong>Statut:</strong> ${entity.isClosed ? "Géométrie fermée" : "En cours de tracé"}</p>
+      <p style="font-size: 13px; margin: 2px 0 10px 0;"><strong>Triangles:</strong> ${entity.mesh.triangles.length}</p>
+      
+      <table style="width: 100%; border-collapse: collapse; font-size: 13px; text-align: center;">
+        <thead>
+          <tr style="background-color: #e9ecef; border-bottom: 2px solid #ccc;">
+            <th style="padding: 4px; border: 1px solid #ccc;">Nœud</th>
+            <th style="padding: 4px; border: 1px solid #ccc;">X (px)</th>
+            <th style="padding: 4px; border: 1px solid #ccc;">Y (px)</th>
+          </tr>
+        </thead>
+        <tbody>
   `;
 
-  blade.contour.forEach((p, index) => {
-    html += `<tr><td>n°${index}</td><td>${Math.round(p.x)}</td><td>${Math.round(p.y)}</td></tr>`;
+  entity.contour.forEach((p, index) => {
+    html += `
+          <tr>
+            <td style="padding: 4px; border: 1px solid #eee;">n°${index}</td>
+            <td style="padding: 4px; border: 1px solid #eee;">${Math.round(p.x)}</td>
+            <td style="padding: 4px; border: 1px solid #eee;">${Math.round(p.y)}</td>
+          </tr>`;
   });
 
-  html += `</tbody></table>`;
-  dataContent.innerHTML = html;
+  html += `
+        </tbody>
+      </table>
+    </div>
+  `;
+  
+  return html;
+}
+
+function updateDataPanel() {
+  const dataContent = document.getElementById("data-content");
+  if (!dataContent) return;
+
+  // Concaténation des données des deux entités
+  let finalHtml = generateEntityTable(blade, "Données de la Lame");
+  
+  // Ligne de séparation visuelle
+  finalHtml += `<hr style="border: 0; border-top: 1px solid #ccc; margin: 15px 0;">`;
+  
+  finalHtml += generateEntityTable(obstacle, "Données de la Bûche");
+
+  // Injection dans le DOM
+  dataContent.innerHTML = finalHtml;
+}
+
+// --- Communication Client-Serveur (API) ---
+async function runSimulation() {
+  // Validation des prérequis géométriques
+  if (!blade.isClosed || blade.mesh.triangles.length === 0) {
+    alert("Erreur : La géométrie de la lame doit être fermée et maillée.");
+    return;
+  }
+
+  // Construction stricte du payload JSON
+  const payload = {
+    blade: {
+      mesh: {
+        // Extraction des coordonnées pour éviter de transmettre des références circulaires ou données inutiles
+        vertices: blade.mesh.vertices.map(v => ({ x: v.x, y: v.y })),
+        triangles: blade.mesh.triangles
+      },
+      kinematics: {
+        velocity: {
+          startX: blade.kinematics.velocity.startX,
+          startY: blade.kinematics.velocity.startY,
+          endX: blade.kinematics.velocity.endX,
+          endY: blade.kinematics.velocity.endY
+        }
+      }
+    }
+  };
+
+  try {
+    // Exécution de la requête asynchrone vers le serveur local
+    const response = await fetch("http://127.0.0.1:8000/api/simulate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    // Vérification du code de statut HTTP
+    if (!response.ok) {
+      throw new Error(`Code d'erreur HTTP : ${response.status}`);
+    }
+
+    // Désérialisation de la réponse JSON
+    const data = await response.json();
+    
+    // Stockage des résultats dans le modèle de données
+    blade.physics.stresses = data.stresses;
+    console.log("Calculs réceptionnés :", blade.physics.stresses);
+
+    // Basculement de l'état de l'application et mise à jour visuelle
+    appState.mode = "simulation";
+    redraw();
+
+  } catch (error) {
+    console.error("Échec de la communication avec le solveur :", error);
+    alert("Erreur de connexion au solveur Python. Vérifiez que Uvicorn est en cours d'exécution.");
+  }
+}
+
+// --- Moteur Colorimétrique (Heatmap) ---
+function getStressColor(stress, maxStress, entityType) {
+  // Tolérance pour ignorer les contraintes quasi-nulles
+  if (maxStress <= 0 || stress <= 0) {
+    return entityType === "blade" ? "rgba(180, 180, 180, 0.7)" : "rgba(173, 216, 230, 0.7)";
+  }
+  
+  const ratio = Math.min(1, Math.max(0, stress / maxStress));
+
+  // Seuil mort : les contraintes inférieures à 10% du maximum ne sont pas colorées
+  if (ratio < 0.1) {
+    return entityType === "blade" ? "rgba(180, 180, 180, 0.7)" : "rgba(173, 216, 230, 0.7)";
+  }
+
+  if (entityType === "blade") {
+    // Tons chauds : Jaune (60°) vers Rouge (0°)
+    const hue = (1 - ratio) * 60; 
+    return `hsla(${hue}, 100%, 50%, 0.85)`;
+  } else {
+    // Tons froids : Bleu (240°) vers Magenta (300°)
+    const hue = 240 + (ratio * 60); 
+    return `hsla(${hue}, 100%, 50%, 0.85)`;
+  }
 }
