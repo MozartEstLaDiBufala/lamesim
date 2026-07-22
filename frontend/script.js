@@ -2,7 +2,7 @@ const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 
 // --- Modèle de données factorisé ---
-const blade = {
+let blade = {
   type: "blade",
   contour: [],
   isClosed: false,
@@ -11,7 +11,7 @@ const blade = {
   kinematics: { velocity: null }
 };
 
-const obstacle = {
+let obstacle = {
   type: "obstacle",
   contour: [],
   isClosed: false,
@@ -19,11 +19,145 @@ const obstacle = {
   physics: { centroid: { x: 0, y: 0 }, area: 0, mass: 0 }
 };
 
+// --- 1. Structure de données globale ---
+let scene = {
+  parts: [],      // Contiendra les objets composant la hache (lame, manche)
+  obstacle: { contour: [], isClosed: false }
+};
+
+// --- 2. Gestionnaire d'historique ---
+const historyManager = {
+  undoStack: [],
+  redoStack: [],
+  maxSize: 30 // Limite pour éviter la saturation de la mémoire vive
+};
+
+// Fonction de capture d'état
+function saveState() {
+  // On photographie explicitement les variables utilisées par votre code actuel
+  const snapshot = structuredClone({ 
+    blade: blade, 
+    obstacle: obstacle 
+  });
+  
+  historyManager.undoStack.push(snapshot);
+  
+  if (historyManager.undoStack.length > historyManager.maxSize) {
+    historyManager.undoStack.shift();
+  }
+  
+  historyManager.redoStack = [];
+  updateHistoryUI();
+}
+
+// Fonction pour reculer dans le temps
+function undo() {
+  if (historyManager.undoStack.length === 0) return;
+  
+  // 1. Sauvegarde de l'état actuel pour le Redo
+  historyManager.redoStack.push(structuredClone({ blade: blade, obstacle: obstacle }));
+  
+  // 2. Récupération de l'état passé
+  const pastState = historyManager.undoStack.pop();
+  
+  // 3. Écrasement des variables globales par les données du passé
+  blade = pastState.blade;
+  obstacle = pastState.obstacle;
+  
+  updateHistoryUI();
+  redraw(); // Met à jour le canevas avec les anciennes données
+}
+
+// Fonction pour avancer dans le temps
+function redo() {
+  if (historyManager.redoStack.length === 0) return;
+  
+  // 1. Sauvegarde pour le Undo
+  historyManager.undoStack.push(structuredClone({ blade: blade, obstacle: obstacle }));
+  
+  // 2. Récupération de l'état futur
+  const futureState = historyManager.redoStack.pop();
+  
+  // 3. Écrasement
+  blade = futureState.blade;
+  obstacle = futureState.obstacle;
+  
+  updateHistoryUI();
+  redraw();
+}
+
+// Mise à jour de l'accessibilité des boutons
+function updateHistoryUI() {
+  const btnUndo = document.getElementById("btn-undo");
+  const btnRedo = document.getElementById("btn-redo");
+  
+  if (btnUndo) btnUndo.disabled = historyManager.undoStack.length === 0;
+  if (btnRedo) btnRedo.disabled = historyManager.redoStack.length === 0;
+}
+
+// Écouteurs pour les boutons HTML
+document.getElementById("btn-undo")?.addEventListener("click", undo);
+document.getElementById("btn-redo")?.addEventListener("click", redo);
+
+// Support des raccourcis clavier standards
+document.addEventListener("keydown", (e) => {
+  if (e.ctrlKey && e.key === 'z') {
+    e.preventDefault();
+    undo();
+  } else if ((e.ctrlKey && e.key === 'y') || (e.ctrlKey && e.shiftKey && e.key === 'Z')) {
+    e.preventDefault();
+    redo();
+  }
+});
+
+// --- Événements Souris (Interaction Canvas) ---
+canvas.addEventListener("mousedown", (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  // 1. Interaction avec la flèche de vitesse (Uniquement si la lame est maillée)
+  if (blade.isClosed && blade.kinematics.velocity) {
+    const v = blade.kinematics.velocity;
+    if (distance(mx, my, v.endX, v.endY) < 15) {
+      appState.draggingVelocity = true;
+      return; 
+    }
+  }
+
+  // 2. Logique de tracé (Lame ou Bûche)
+  if (appState.mode === "draw_blade" || appState.mode === "draw_obstacle") {
+    const target = appState.mode === "draw_blade" ? blade : obstacle;
+    
+    if (!target.isClosed) {
+      // ➔ PHOTO DE L'ÉTAT AVANT TOUTE MODIFICATION
+      saveState();
+
+      // Si on clique près du point de départ, on ferme la géométrie
+      if (target.contour.length > 2 && distance(mx, my, target.contour[0].x, target.contour[0].y) < 15) {
+        target.isClosed = true;
+        generateMesh(target); // Le maillage calcule ses propres données
+      } else {
+        // Sinon, on ajoute un simple point
+        target.contour.push({ x: mx, y: my });
+      }
+      
+      redraw();
+    }
+  }
+});
+
+
 const appState = {
   mode: "draw_blade", // "draw_blade", "draw_obstacle", "simulation"
   showMeshLines: true,
   draggingVelocity: false
 };
+
+// --- Moteur de Simulation (Buffer Temporel) ---
+const simulationBuffer = []; // Stockera toutes les frames JSON reçues
+let currentFrameIndex = 0;   // Position actuelle de lecture sur la timeline
+let wsConnection = null;     // L'instance de la connexion serveur
 
 // --- Initialisation ---
 function resizeCanvas() {
@@ -128,35 +262,6 @@ function generateMesh(target) {
 document.getElementById("input-vx")?.addEventListener("input", syncVelocityFromInputs);
 document.getElementById("input-vy")?.addEventListener("input", syncVelocityFromInputs);
 
-// --- Événements Souris (Interaction Canvas) ---
-canvas.addEventListener("mousedown", e => {
-  const rect = canvas.getBoundingClientRect();
-  const mx = e.clientX - rect.left;
-  const my = e.clientY - rect.top;
-
-  if (blade.isClosed && blade.kinematics.velocity) {
-    const v = blade.kinematics.velocity;
-    if (distance(mx, my, v.endX, v.endY) < 15) {
-      appState.draggingVelocity = true;
-      return; 
-    }
-  }
-
-  // Aiguillage du tracé selon le mode actif
-  if (appState.mode === "draw_blade" || appState.mode === "draw_obstacle") {
-    const target = appState.mode === "draw_blade" ? blade : obstacle;
-    
-    if (!target.isClosed) {
-      if (target.contour.length > 2 && distance(mx, my, target.contour[0].x, target.contour[0].y) < 15) {
-        target.isClosed = true;
-        generateMesh(target); // Maillage automatique à la fermeture
-      } else {
-        target.contour.push({ x: mx, y: my });
-        redraw();
-      }
-    }
-  }
-});
 
 canvas.addEventListener("mousemove", e => {
   // 3. Logique de déplacement de la flèche
@@ -183,24 +288,40 @@ document.getElementById("btn-toggle-mesh")?.addEventListener("click", () => {
 });
 document.getElementById("btn-sim")?.addEventListener("click", runSimulation);
 
-// --- Moteur de Rendu Visuel ---
+// --- Moteur de Rendu ---
 function drawEntity(target) {
-  // 1. Dessin du périmètre
-  if (target.contour.length > 0) {
+  // 1. Détermination de la source de données
+  // Par défaut, on affiche ce que l'utilisateur est en train de tracer
+  let contourToDraw = target.contour; 
+  let meshVertices = target.mesh.vertices;
+  let activeStresses = null;
+
+  // Si on est en mode simulation ET qu'on a des données en mémoire, on écrase les coordonnées
+  if (appState.mode === "simulation" && simulationBuffer.length > 0) {
+    const frameData = simulationBuffer[currentFrameIndex].data[target.type];
+    if (frameData && frameData.vertices && frameData.vertices.length > 0) {
+      contourToDraw = frameData.vertices; // Déforme les contours
+      meshVertices = frameData.vertices;  // Déforme le maillage interne
+      activeStresses = frameData.peak_stresses;
+    }
+  }
+
+  // 2. Dessin du périmètre (Utilise le tracé brut ou le tracé simulé)
+  if (contourToDraw.length > 0) {
     ctx.strokeStyle = target.type === "blade" ? "#333" : "#004085";
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(target.contour[0].x, target.contour[0].y);
-    for (let i = 1; i < target.contour.length; i++) {
-      ctx.lineTo(target.contour[i].x, target.contour[i].y);
+    ctx.moveTo(contourToDraw[0].x, contourToDraw[0].y);
+    for (let i = 1; i < contourToDraw.length; i++) {
+      ctx.lineTo(contourToDraw[i].x, contourToDraw[i].y);
     }
     if (target.isClosed) ctx.closePath();
     ctx.stroke();
     
-    // Dissimulation des nœuds de contrôle une fois la géométrie fermée
-    if (!target.isClosed) {
+    // Nœuds de contrôle (Visibles uniquement pendant le tracé, pas en simulation)
+    if (!target.isClosed && appState.mode !== "simulation") {
       ctx.fillStyle = target.type === "blade" ? "blue" : "darkcyan";
-      target.contour.forEach(p => {
+      contourToDraw.forEach(p => {
         ctx.beginPath();
         ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
         ctx.fill();
@@ -208,35 +329,33 @@ function drawEntity(target) {
     }
   }
 
-  // 2. Dessin du maillage continu (Base pour la Heatmap)
+  // 3. Dessin du maillage et de la Heatmap
   if (target.isClosed && target.mesh.triangles.length > 0) {
     
-    // Détermination de la contrainte maximale si des résultats existent
     let maxStress = 0;
-    const hasStresses = appState.mode === "simulation" && target.physics.stresses && target.physics.stresses.length === target.mesh.triangles.length;
-    
-    if (hasStresses) {
-      maxStress = Math.max(...target.physics.stresses);
+    if (activeStresses && activeStresses.length > 0) {
+      maxStress = Math.max(...activeStresses);
     }
 
-    // Il faut récupérer l'index (triIndex) pour associer le triangle à sa contrainte
     target.mesh.triangles.forEach((tri, triIndex) => {
-      
       let fillColor = target.type === "blade" ? "rgba(180, 180, 180, 0.7)" : "rgba(173, 216, 230, 0.7)";
       
-      // Application de la couleur interpolée si les données sont valides
-      if (hasStresses) {
-        fillColor = getStressColor(target.physics.stresses[triIndex], maxStress, target.type);
+      // Application de la couleur d'effort si la donnée existe
+      if (activeStresses && activeStresses[triIndex] !== undefined) {
+        fillColor = getStressColor(activeStresses[triIndex], maxStress, target.type);
       }
       
       ctx.fillStyle = fillColor;
       ctx.beginPath();
-      ctx.moveTo(target.mesh.vertices[tri[0]].x, target.mesh.vertices[tri[0]].y);
-      ctx.lineTo(target.mesh.vertices[tri[1]].x, target.mesh.vertices[tri[1]].y);
-      ctx.lineTo(target.mesh.vertices[tri[2]].x, target.mesh.vertices[tri[2]].y);
+      
+      // Utilisation des coordonnées sécurisées du maillage
+      ctx.moveTo(meshVertices[tri[0]].x, meshVertices[tri[0]].y);
+      ctx.lineTo(meshVertices[tri[1]].x, meshVertices[tri[1]].y);
+      ctx.lineTo(meshVertices[tri[2]].x, meshVertices[tri[2]].y);
       ctx.closePath();
       ctx.fill(); 
       
+      // Lignes de maillage conditionnelles
       if (appState.showMeshLines) {
         ctx.strokeStyle = target.type === "blade" ? "#999" : "#87CEFA";
         ctx.lineWidth = 1;
@@ -420,3 +539,73 @@ function getStressColor(stress, maxStress, entityType) {
     return `hsla(${hue}, 100%, 50%, 0.85)`;
   }
 }
+
+// --- Protocole WebSocket et Timeline ---
+function connectSimulationStream() {
+  const statusIndicator = document.getElementById("ws-status");
+  
+  // Remplacer l'URL plus tard par la vraie adresse de votre serveur Python
+  wsConnection = new WebSocket("ws://localhost:8000/stream");
+
+  wsConnection.onopen = () => {
+    statusIndicator.textContent = "● Connecté (Calcul en cours...)";
+    statusIndicator.style.color = "#28a745"; 
+    appState.mode = "simulation"; 
+    
+    // NOUVEAU : Envoi du payload géométrique dès l'ouverture du canal
+    const payload = {
+      blade: blade,
+      obstacle: obstacle
+    };
+    wsConnection.send(JSON.stringify(payload));
+  };
+
+  wsConnection.onmessage = (event) => {
+    // 1. Sauvegarde des données
+    const frameData = JSON.parse(event.data);
+    simulationBuffer.push(frameData);
+    
+    // 2. Mise à jour de l'interface
+    statusIndicator.textContent = "● Flux actif";
+    statusIndicator.style.color = "#007bff"; // Bleu
+    document.getElementById("buffer-size").textContent = `${simulationBuffer.length} frames`;
+    
+    // 3. Déverrouillage et extension de la timeline
+    const slider = document.getElementById("sim-slider");
+    slider.disabled = false;
+    slider.max = simulationBuffer.length - 1;
+    
+    // 4. Auto-scroll : si l'utilisateur regarde la dernière frame, 
+    // le curseur avance tout seul avec les nouvelles données
+    if (parseInt(slider.value) >= simulationBuffer.length - 2) {
+      slider.value = simulationBuffer.length - 1;
+      currentFrameIndex = simulationBuffer.length - 1;
+      updateTimelineUI();
+    }
+  };
+
+  wsConnection.onerror = () => {
+    statusIndicator.textContent = "● Erreur réseau";
+    statusIndicator.style.color = "#dc3545"; // Rouge
+  };
+}
+
+function updateTimelineUI() {
+  if (simulationBuffer.length === 0) return;
+  
+  // Extraction des données de la frame ciblée
+  const frame = simulationBuffer[currentFrameIndex];
+  
+  // Affichage de la distance de pénétration en cm
+  document.getElementById("sim-displacement").textContent = `${frame.blade_displacement_cm.toFixed(2)} cm`;
+  
+  // Recalcul visuel
+  redraw();
+}
+
+// --- Écouteurs pour la timeline ---
+document.getElementById("btn-start-stream")?.addEventListener("click", connectSimulationStream);
+document.getElementById("sim-slider")?.addEventListener("input", (e) => {
+  currentFrameIndex = parseInt(e.target.value);
+  updateTimelineUI();
+});

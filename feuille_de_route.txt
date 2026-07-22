@@ -1,7 +1,8 @@
 cd C:\Users\1moza\Desktop\Projet\Simu_lame\lamesim
 .venv\Scripts\activate
-uv add fastapi uvicorn pydantic
+uv add fastapi "uvicorn[standard]" pydantic scipy
 uv run uvicorn backend.main:app --reload
+
 
 Feuille de route : Simulateur Mécanique (BladeSim)
 

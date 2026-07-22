@@ -1,22 +1,21 @@
-from fastapi import FastAPI
+import asyncio
+import json
+import math
+from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import math
 
-# Initialisation de l'API
-app = FastAPI(title="BladeSim API")
+app = FastAPI(title="BladeSim API - Streaming Edition")
 
-# Configuration CORS (Indispensable pour autoriser le navigateur à communiquer avec le serveur local)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # En production, il faudra spécifier l'URL exacte du frontend
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- Définition des structures de données (Schémas Pydantic) ---
-# Ces classes doivent refléter exactement l'objet JSON envoyé par JavaScript
+# --- 1. Conservation de vos structures de données (Pydantic) ---
 class Point(BaseModel):
     x: float
     y: float
@@ -40,45 +39,80 @@ class Blade(BaseModel):
 
 class SimulationPayload(BaseModel):
     blade: Blade
-    # L'obstacle sera ajouté ici ultérieurement
+    # On autorise un dictionnaire générique pour l'obstacle en attendant son modèle Pydantic strict
+    obstacle: dict | None = None 
 
-# --- Point de terminaison (Endpoint) de la simulation ---
-@app.post("/api/simulate")
-def solve_impact(payload: SimulationPayload):
-    """
-    Solveur PoC : Calcule une contrainte arbitraire basée sur la distance 
-    entre chaque triangle et le point d'impact du vecteur vitesse.
-    """
-    blade = payload.blade
-    vertices = blade.mesh.vertices
-    triangles = blade.mesh.triangles
-    vel = blade.kinematics.velocity
+# --- 2. Le point de terminaison asynchrone (WebSocket) ---
+@app.websocket("/stream")
+async def simulation_stream(websocket: WebSocket):
+    await websocket.accept()
+    print("Connexion WebSocket établie. En attente des données géométriques...")
     
-    # Le point d'impact est considéré comme la pointe de la flèche de vitesse
-    impact_x = vel.endX
-    impact_y = vel.endY
-    
-    # La norme du vecteur simule grossièrement la force (F)
-    force_magnitude = math.hypot(vel.endX - vel.startX, vel.endY - vel.startY)
-    
-    stresses = []
-    
-    # Boucle sur chaque élément du maillage
-    for tri in triangles:
-        # 1. Calcul du barycentre du triangle
-        p0, p1, p2 = vertices[tri[0]], vertices[tri[1]], vertices[tri[2]]
-        cx = (p0.x + p1.x + p2.x) / 3.0
-        cy = (p0.y + p1.y + p2.y) / 3.0
+    try:
+        # A. Réception et validation stricte du premier message (La géométrie)
+        data_text = await websocket.receive_text()
+        raw_data = json.loads(data_text)
+        payload = SimulationPayload(**raw_data) # Validation via Pydantic
         
-        # 2. Calcul de la distance géométrique (d) à l'impact
-        distance = math.hypot(cx - impact_x, cy - impact_y)
+        blade = payload.blade
+        original_vertices = blade.mesh.vertices
+        triangles = blade.mesh.triangles
+        vel = blade.kinematics.velocity
         
-        # 3. Application de la loi mathématique factice : σ = F / (d^2 + 1)
-        # On divise la distance par 10 pour que l'atténuation soit visuellement intéressante sur le canvas
-        normalized_distance = distance / 10.0 
-        sigma = force_magnitude / ((normalized_distance ** 2) + 1)
+        # B. Paramètres initiaux
+        force_magnitude = math.hypot(vel.endX - vel.startX, vel.endY - vel.startY)
+        impact_x = vel.endX
+        impact_y = vel.endY
         
-        stresses.append(sigma)
-        
-    # Le serveur renvoie un objet JSON contenant le tableau des contraintes
-    return {"stresses": stresses}
+        print("Données validées. Lancement du solveur PoC...")
+
+        # C. Boucle de calcul temporel (Le streaming)
+        TOTAL_FRAMES = 50
+        for frame_id in range(TOTAL_FRAMES):
+            
+            stresses = []
+            current_vertices = []
+            
+            # Simulation d'un léger déplacement (ex: la lame descend de 2 pixels par frame)
+            # Dans un vrai solveur, cela dépendra de la matrice de rigidité
+            y_displacement = frame_id * 2.0 
+            
+            for pt in original_vertices:
+                current_vertices.append({"x": pt.x, "y": pt.y + y_displacement})
+            
+            # Application de VOTRE algorithme mathématique sur les triangles déplacés
+            for tri in triangles:
+                p0, p1, p2 = current_vertices[tri[0]], current_vertices[tri[1]], current_vertices[tri[2]]
+                cx = (p0["x"] + p1["x"] + p2["x"]) / 3.0
+                cy = (p0["y"] + p1["y"] + p2["y"]) / 3.0
+                
+                distance = math.hypot(cx - impact_x, cy - (impact_y + y_displacement))
+                normalized_distance = distance / 10.0 
+                
+                # σ = F / (d^2 + 1)
+                sigma = force_magnitude / ((normalized_distance ** 2) + 1)
+                stresses.append(sigma)
+            
+            # Construction de la frame selon l'architecture définie précédemment
+            frame_payload = {
+                "frame_id": frame_id,
+                "sim_time_sec": frame_id * 0.001,
+                "blade_displacement_cm": frame_id * 0.1,
+                "data": {
+                    "blade": {
+                        "vertices": current_vertices,
+                        "peak_stresses": stresses
+                    },
+                    "obstacle": {
+                        "vertices": [],
+                        "peak_stresses": []
+                    }
+                }
+            }
+            
+            # Envoi binaire/texte au navigateur
+            await websocket.send_text(json.dumps(frame_payload))
+            await asyncio.sleep(0.05) # Temporisation pour simuler la charge de calcul
+            
+    except Exception as e:
+        print(f"Erreur ou déconnexion : {e}")
