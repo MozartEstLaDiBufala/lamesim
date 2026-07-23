@@ -17,6 +17,14 @@ Actions (Python) : Création du point de terminaison HTTP (FastAPI).
 Implémentation d'un solveur "factice" calculant une contrainte arbitraire via atténuation radiale : sigma = (F) / (d^2 + 1).
 Rendu (JS) : Réception du tableau de valeurs et génération d'une heatmap basique interpolant les couleurs des triangles selon leur contrainte.
 
+
+Retour au PoC (Frontend) : Nous ajoutons un "Mode Fixation" au code JavaScript. L'utilisateur dessinera sa géométrie complète (la lame et le manche formant une seule pièce continue). Il utilisera ensuite ce nouveau mode pour colorier les nœuds du manche qui simulent la prise en main.
+
+Reprise du Jalon 3 (Backend) : Le frontend enverra cette topologie enrichie au serveur Python. Le solveur pourra alors calculer la déformation de la hache entière en appliquant la méthode de pénalité sur les nœuds sélectionnés.
+
+Évolution ultérieure : Une fois la physique des matrices creuses validée sur cette pièce monobloc, l'architecture sera suffisamment robuste pour introduire la séparation des matériaux (bois vs acier).
+
+
 Jalon 3 : Physique Linéaire (Élasticité)
 Objectif : Remplacer le PoC par un véritable modèle mécanique (Loi de Hooke).
 Actions (Python) : Conversion du JSON en matrices NumPy. 

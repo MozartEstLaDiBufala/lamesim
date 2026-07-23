@@ -37,7 +37,25 @@
       <strong id="sim-displacement">0.00 cm</strong>
     </div>
   </div>
+  <!-- Barre d'outils géométriques et matériaux -->
+  <div id="tools-container" style="margin-bottom: 10px; display: flex; gap: 10px; align-items: center; background: #f8f9fa; padding: 10px; border: 1px solid #ccc; border-radius: 5px;">
+    
+    <strong>Outils :</strong>
+    <select id="select-tool" style="padding: 5px;">
+      <option value="draw_blade">✎ Tracer (Hache entière)</option>
+      <option value="draw_obstacle">✎ Tracer (Bûche)</option>
+      <option value="move">✥ Déplacer un point</option>
+      <option value="erase">⌫ Gommer un point</option>
+      <option value="paint">🖌 Peindre un matériau</option>
+    </select>
 
+    <strong style="margin-left: 15px;">Matériau (Pinceau) :</strong>
+    <select id="select-material" style="padding: 5px;">
+      <option value="steel">Acier (Gris)</option>
+      <option value="wood">Bois de Frêne (Marron)</option>
+    </select>
+
+  </div>
   <div id="main-container">
     <!-- Panneau d'information latéral -->
     <aside id="info-panel">

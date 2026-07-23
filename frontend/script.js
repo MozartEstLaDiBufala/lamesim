@@ -1,12 +1,18 @@
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 
+// --- Base de données des Matériaux ---
+const materialsDB = {
+  "steel": { name: "Acier", color: "rgba(180, 180, 180, 0.7)" },
+  "wood":  { name: "Bois de Frêne", color: "rgba(139, 69, 19, 0.7)" }
+};
+
 // --- Modèle de données factorisé ---
 let blade = {
   type: "blade",
   contour: [],
   isClosed: false,
-  mesh: { vertices: [], triangles: [] },
+  mesh: { vertices: [], elements: [] }, // "elements" remplace "triangles"
   physics: { centroid: { x: 0, y: 0 }, area: 0, mass: 1.0, stresses: [] },
   kinematics: { velocity: null }
 };
@@ -15,9 +21,19 @@ let obstacle = {
   type: "obstacle",
   contour: [],
   isClosed: false,
-  mesh: { vertices: [], triangles: [] },
+  mesh: { vertices: [], elements: [] },
   physics: { centroid: { x: 0, y: 0 }, area: 0, mass: 0 }
 };
+
+// --- Machine à États ---
+const appState = {
+  mode: "draw_blade", // draw_blade, draw_obstacle, move, erase, paint, simulation
+  currentMaterial: "steel",
+  showMeshLines: true,
+  draggedPoint: null, // Référence au point en cours de déplacement
+  activeTarget: null  // Entité affectée par le déplacement
+};
+
 
 // --- 1. Structure de données globale ---
 let scene = {
@@ -110,50 +126,6 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-// --- Événements Souris (Interaction Canvas) ---
-canvas.addEventListener("mousedown", (e) => {
-  const rect = canvas.getBoundingClientRect();
-  const mx = e.clientX - rect.left;
-  const my = e.clientY - rect.top;
-
-  // 1. Interaction avec la flèche de vitesse (Uniquement si la lame est maillée)
-  if (blade.isClosed && blade.kinematics.velocity) {
-    const v = blade.kinematics.velocity;
-    if (distance(mx, my, v.endX, v.endY) < 15) {
-      appState.draggingVelocity = true;
-      return; 
-    }
-  }
-
-  // 2. Logique de tracé (Lame ou Bûche)
-  if (appState.mode === "draw_blade" || appState.mode === "draw_obstacle") {
-    const target = appState.mode === "draw_blade" ? blade : obstacle;
-    
-    if (!target.isClosed) {
-      // ➔ PHOTO DE L'ÉTAT AVANT TOUTE MODIFICATION
-      saveState();
-
-      // Si on clique près du point de départ, on ferme la géométrie
-      if (target.contour.length > 2 && distance(mx, my, target.contour[0].x, target.contour[0].y) < 15) {
-        target.isClosed = true;
-        generateMesh(target); // Le maillage calcule ses propres données
-      } else {
-        // Sinon, on ajoute un simple point
-        target.contour.push({ x: mx, y: my });
-      }
-      
-      redraw();
-    }
-  }
-});
-
-
-const appState = {
-  mode: "draw_blade", // "draw_blade", "draw_obstacle", "simulation"
-  showMeshLines: true,
-  draggingVelocity: false
-};
-
 // --- Moteur de Simulation (Buffer Temporel) ---
 const simulationBuffer = []; // Stockera toutes les frames JSON reçues
 let currentFrameIndex = 0;   // Position actuelle de lecture sur la timeline
@@ -199,6 +171,56 @@ function calculateCentroid(pointsArray) {
   return { x: cx, y: cy, area: Math.abs(area) };
 }
 
+// Détecte le point le plus proche de la souris
+function findClosestPoint(mx, my, threshold = 15) {
+  for (let target of [blade, obstacle]) {
+    for (let i = 0; i < target.contour.length; i++) {
+      let p = target.contour[i];
+      if (distance(mx, my, p.x, p.y) < threshold) {
+        return { target: target, point: p, index: i };
+      }
+    }
+  }
+  return null;
+}
+
+// Détecte si un point (px, py) est à l'intérieur d'un triangle
+function isPointInTriangle(px, py, ax, ay, bx, by, cx, cy) {
+  let v0x = cx - ax, v0y = cy - ay;
+  let v1x = bx - ax, v1y = by - ay;
+  let v2x = px - ax, v2y = py - ay;
+
+  let dot00 = v0x * v0x + v0y * v0y;
+  let dot01 = v0x * v1x + v0y * v1y;
+  let dot02 = v0x * v2x + v0y * v2y;
+  let dot11 = v1x * v1x + v1y * v1y;
+  let dot12 = v1x * v2x + v1y * v2y;
+
+  let invDenom = 1 / (dot00 * dot11 - dot01 * dot01);
+  let u = (dot11 * dot02 - dot01 * dot12) * invDenom;
+  let v = (dot00 * dot12 - dot01 * dot02) * invDenom;
+
+  return (u >= 0) && (v >= 0) && (u + v < 1);
+}
+
+// Applique le matériau sélectionné au triangle survolé
+function paintTriangleAt(mx, my) {
+  if (!blade.isClosed) return;
+  const vertices = blade.mesh.vertices;
+  
+  for (let element of blade.mesh.elements) {
+    let p0 = vertices[element.nodes[0]];
+    let p1 = vertices[element.nodes[1]];
+    let p2 = vertices[element.nodes[2]];
+    
+    if (isPointInTriangle(mx, my, p0.x, p0.y, p1.x, p1.y, p2.x, p2.y)) {
+      element.material = appState.currentMaterial;
+      redraw();
+      break; // Un seul triangle à la fois
+    }
+  }
+}
+
 // --- Synchronisation Cinématique ---
 function syncVelocityInputs() {
   const v = blade.kinematics.velocity;
@@ -230,15 +252,15 @@ function generateMesh(target) {
 
   const trianglesIndices = earcut(flatCoords);
   target.mesh.vertices = [...target.contour];
-  target.mesh.triangles = [];
+  target.mesh.elements = [];
   
   for (let i = 0; i < trianglesIndices.length; i += 3) {
-    target.mesh.triangles.push([
-      trianglesIndices[i],
-      trianglesIndices[i+1],
-      trianglesIndices[i+2]
-    ]);
+    target.mesh.elements.push({
+      nodes: [trianglesIndices[i], trianglesIndices[i+1], trianglesIndices[i+2]],
+      material: "steel" // Matériau par défaut au maillage
+    });
   }
+  
 
   const centroidData = calculateCentroid(target.contour);
   target.physics.centroid = { x: centroidData.x, y: centroidData.y };
@@ -263,22 +285,6 @@ document.getElementById("input-vx")?.addEventListener("input", syncVelocityFromI
 document.getElementById("input-vy")?.addEventListener("input", syncVelocityFromInputs);
 
 
-canvas.addEventListener("mousemove", e => {
-  // 3. Logique de déplacement de la flèche
-  if (appState.draggingVelocity && blade.kinematics.velocity) {
-    const rect = canvas.getBoundingClientRect();
-    blade.kinematics.velocity.endX = e.clientX - rect.left;
-    blade.kinematics.velocity.endY = e.clientY - rect.top;
-    syncVelocityInputs(); // Met à jour le panneau latéral en temps réel
-    redraw();
-  }
-});
-
-window.addEventListener("mouseup", () => {
-  // 4. Relâchement de toute action de glissement
-  appState.draggingVelocity = false;
-});
-
 // --- Événements Interface (Boutons) ---
 document.getElementById("btn-draw-blade")?.addEventListener("click", () => { appState.mode = "draw_blade"; });
 document.getElementById("btn-draw-obs")?.addEventListener("click", () => { appState.mode = "draw_obstacle"; });
@@ -287,6 +293,80 @@ document.getElementById("btn-toggle-mesh")?.addEventListener("click", () => {
   redraw();
 });
 document.getElementById("btn-sim")?.addEventListener("click", runSimulation);
+
+
+// --- Événements Interface (Menu déroulant) ---
+document.getElementById("select-tool")?.addEventListener("change", (e) => {
+  appState.mode = e.target.value;
+});
+document.getElementById("select-material")?.addEventListener("change", (e) => {
+  appState.currentMaterial = e.target.value;
+});
+
+// --- Événements Souris (Interaction Canvas) ---
+canvas.addEventListener("mousedown", e => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  if (appState.mode === "simulation") return;
+
+  saveState(); // ➔ PHOTO DE L'ÉTAT AVANT TOUTE MODIFICATION
+
+  if (appState.mode === "draw_blade" || appState.mode === "draw_obstacle") {
+    const target = appState.mode === "draw_blade" ? blade : obstacle;
+    if (!target.isClosed) {
+      if (target.contour.length > 2 && distance(mx, my, target.contour[0].x, target.contour[0].y) < 15) {
+        target.isClosed = true;
+        generateMesh(target);
+      } else {
+        target.contour.push({ x: mx, y: my });
+        redraw();
+      }
+    }
+  } 
+  else if (appState.mode === "move") {
+    const closest = findClosestPoint(mx, my);
+    if (closest) {
+      appState.draggedPoint = closest.point;
+      appState.activeTarget = closest.target;
+    }
+  } 
+  else if (appState.mode === "erase") {
+    const closest = findClosestPoint(mx, my);
+    if (closest) {
+      closest.target.contour.splice(closest.index, 1);
+      if (closest.target.isClosed) generateMesh(closest.target); // Remaillage automatique
+      redraw();
+    }
+  } 
+  else if (appState.mode === "paint") {
+    paintTriangleAt(mx, my);
+  }
+});
+
+canvas.addEventListener("mousemove", e => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  // Outil Déplacer
+  if (appState.mode === "move" && appState.draggedPoint) {
+    appState.draggedPoint.x = mx;
+    appState.draggedPoint.y = my;
+    if (appState.activeTarget.isClosed) generateMesh(appState.activeTarget);
+    redraw();
+  }
+  // Outil Peindre en continu (Clic maintenu)
+  else if (appState.mode === "paint" && e.buttons === 1) {
+    paintTriangleAt(mx, my);
+  }
+});
+
+window.addEventListener("mouseup", () => {
+  appState.draggedPoint = null;
+  appState.activeTarget = null;
+});
 
 // --- Moteur de Rendu ---
 function drawEntity(target) {
@@ -329,29 +409,24 @@ function drawEntity(target) {
     }
   }
 
-  // 3. Dessin du maillage et de la Heatmap
-  if (target.isClosed && target.mesh.triangles.length > 0) {
-    
-    let maxStress = 0;
-    if (activeStresses && activeStresses.length > 0) {
-      maxStress = Math.max(...activeStresses);
-    }
+  // 3. Dessin du maillage
+  if (target.isClosed && target.mesh.elements.length > 0) {
+    let maxStress = activeStresses ? Math.max(...activeStresses) : 0;
 
-    target.mesh.triangles.forEach((tri, triIndex) => {
-      let fillColor = target.type === "blade" ? "rgba(180, 180, 180, 0.7)" : "rgba(173, 216, 230, 0.7)";
+    target.mesh.elements.forEach((element, triIndex) => {
+      // Récupération de la couleur du matériau défini
+      let baseColor = materialsDB[element.material] ? materialsDB[element.material].color : "rgba(180, 180, 180, 0.7)";
       
-      // Application de la couleur d'effort si la donnée existe
+      let fillColor = baseColor;
       if (activeStresses && activeStresses[triIndex] !== undefined) {
-        fillColor = getStressColor(activeStresses[triIndex], maxStress, target.type);
+        fillColor = getStressColor(activeStresses[triIndex], maxStress, baseColor);
       }
       
       ctx.fillStyle = fillColor;
       ctx.beginPath();
-      
-      // Utilisation des coordonnées sécurisées du maillage
-      ctx.moveTo(meshVertices[tri[0]].x, meshVertices[tri[0]].y);
-      ctx.lineTo(meshVertices[tri[1]].x, meshVertices[tri[1]].y);
-      ctx.lineTo(meshVertices[tri[2]].x, meshVertices[tri[2]].y);
+      ctx.moveTo(meshVertices[element.nodes[0]].x, meshVertices[element.nodes[0]].y);
+      ctx.lineTo(meshVertices[element.nodes[1]].x, meshVertices[element.nodes[1]].y);
+      ctx.lineTo(meshVertices[element.nodes[2]].x, meshVertices[element.nodes[2]].y);
       ctx.closePath();
       ctx.fill(); 
       
@@ -409,7 +484,7 @@ function generateEntityTable(entity, title) {
     <div style="margin-bottom: 15px;">
       <h4 style="margin: 0 0 5px 0; color: #333;">${title}</h4>
       <p style="font-size: 13px; margin: 2px 0;"><strong>Statut:</strong> ${entity.isClosed ? "Géométrie fermée" : "En cours de tracé"}</p>
-      <p style="font-size: 13px; margin: 2px 0 10px 0;"><strong>Triangles:</strong> ${entity.mesh.triangles.length}</p>
+      <p style="font-size: 13px; margin: 2px 0 10px 0;"><strong>Triangles:</strong> ${entity.mesh.elements.length}</p>
       
       <table style="width: 100%; border-collapse: collapse; font-size: 13px; text-align: center;">
         <thead>
@@ -459,7 +534,7 @@ function updateDataPanel() {
 // --- Communication Client-Serveur (API) ---
 async function runSimulation() {
   // Validation des prérequis géométriques
-  if (!blade.isClosed || blade.mesh.triangles.length === 0) {
+  if (!blade.isClosed || blade.mesh.elements.length === 0) {
     alert("Erreur : La géométrie de la lame doit être fermée et maillée.");
     return;
   }
@@ -468,9 +543,9 @@ async function runSimulation() {
   const payload = {
     blade: {
       mesh: {
-        // Extraction des coordonnées pour éviter de transmettre des références circulaires ou données inutiles
         vertices: blade.mesh.vertices.map(v => ({ x: v.x, y: v.y })),
-        triangles: blade.mesh.triangles
+        // On envoie désormais les éléments avec leurs matériaux au serveur
+        elements: blade.mesh.elements 
       },
       kinematics: {
         velocity: {
@@ -515,29 +590,12 @@ async function runSimulation() {
   }
 }
 
-// --- Moteur Colorimétrique (Heatmap) ---
-function getStressColor(stress, maxStress, entityType) {
-  // Tolérance pour ignorer les contraintes quasi-nulles
-  if (maxStress <= 0 || stress <= 0) {
-    return entityType === "blade" ? "rgba(180, 180, 180, 0.7)" : "rgba(173, 216, 230, 0.7)";
-  }
-  
+// --- Moteur Colorimétrique ---
+function getStressColor(stress, maxStress, baseColor) {
+  if (!maxStress || stress <= 0 || (stress / maxStress) < 0.1) return baseColor;
   const ratio = Math.min(1, Math.max(0, stress / maxStress));
-
-  // Seuil mort : les contraintes inférieures à 10% du maximum ne sont pas colorées
-  if (ratio < 0.1) {
-    return entityType === "blade" ? "rgba(180, 180, 180, 0.7)" : "rgba(173, 216, 230, 0.7)";
-  }
-
-  if (entityType === "blade") {
-    // Tons chauds : Jaune (60°) vers Rouge (0°)
-    const hue = (1 - ratio) * 60; 
-    return `hsla(${hue}, 100%, 50%, 0.85)`;
-  } else {
-    // Tons froids : Bleu (240°) vers Magenta (300°)
-    const hue = 240 + (ratio * 60); 
-    return `hsla(${hue}, 100%, 50%, 0.85)`;
-  }
+  // Superpose une teinte rouge d'intensité variable
+  return `hsla(${(1 - ratio) * 60}, 100%, 50%, 0.85)`;
 }
 
 // --- Protocole WebSocket et Timeline ---
