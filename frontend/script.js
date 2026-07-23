@@ -605,17 +605,26 @@ function updateDataPanel() {
 
 // --- Communication Client-Serveur (API) ---
 async function runSimulation() {
-  // 1. Vérification de la géométrie
+  // 1. Vérifications de sécurité
   if (!blade.isClosed || blade.mesh.elements.length === 0) {
     alert("Erreur : La géométrie de la lame doit être fermée et maillée.");
     return;
   }
-
-  // 2. Vérification de la connexion
   if (!wsConnection || wsConnection.readyState !== WebSocket.OPEN) {
     alert("Erreur : Le serveur n'est pas connecté.");
     return;
   }
+
+  // --- NOUVEAU : Purge du buffer et réinitialisation de la timeline ---
+  simulationBuffer.length = 0; 
+  currentFrameIndex = 0;
+  
+  const slider = document.getElementById("sim-slider");
+  if (slider) {
+    slider.value = 0;
+    slider.max = 0;
+  }
+  // -------------------------------------------------------------------
 
   // 3. Construction du payload
   const payload = {
@@ -641,7 +650,7 @@ async function runSimulation() {
     }
   };
 
-  // 4. Envoi instantané via le tunnel WebSocket
+  // 4. Envoi via le tunnel WebSocket
   wsConnection.send(JSON.stringify(payload));
   
   // 5. Basculement de l'interface
@@ -680,6 +689,17 @@ function connectSimulationStream() {
       btnSim.disabled = false;
       btnSim.style.opacity = "1";
     }
+  };
+
+  wsConnection.onclose = (event) => {
+    statusIndicator.textContent = "● Déconnecté (Serveur fermé)";
+    statusIndicator.style.color = "#6c757d"; // Gris
+    
+    // On reverrouille le bouton d'envoi car la ligne est coupée
+    const btnSim = document.getElementById("btn-sim");
+    if (btnSim) btnSim.disabled = true;
+    
+    console.warn("WebSocket fermé par le serveur. Code:", event.code);
   };
 
   wsConnection.onmessage = (event) => {
@@ -728,4 +748,16 @@ document.getElementById("btn-sim")?.addEventListener("click", runSimulation);
 document.getElementById("sim-slider")?.addEventListener("input", (e) => {
   currentFrameIndex = parseInt(e.target.value);
   updateTimelineUI();
+});
+
+document.getElementById("btn-edit")?.addEventListener("click", () => {
+  // 1. On lit quel outil est actuellement sélectionné dans le menu déroulant
+  const toolSelector = document.getElementById("select-tool");
+  const fallbackTool = toolSelector ? toolSelector.value : "draw_blade";
+
+  // 2. On change le mode global de l'application
+  appState.mode = fallbackTool;
+
+  // 3. On redessine le canevas
+  redraw();
 });
