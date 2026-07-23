@@ -135,8 +135,17 @@ let wsConnection = null;     // L'instance de la connexion serveur
 function resizeCanvas() {
   const container = document.getElementById("canvas-container");
   if (!container) return;
+
+  // S'adapte à la largeur du conteneur parent
   canvas.width = container.clientWidth;
-  canvas.height = window.innerHeight * 0.85;
+  
+  // Calcule la position exacte du haut du canevas sur l'écran
+  const rect = canvas.getBoundingClientRect();
+  
+  // La hauteur devient : l'écran total MOINS l'espace occupé au-dessus
+  // On retire encore 5 ou 10 pixels pour avoir une petite marge de respiration en bas
+  canvas.height = window.innerHeight - rect.top - 10; 
+  
   redraw();
 }
 
@@ -201,6 +210,17 @@ function isPointInTriangle(px, py, ax, ay, bx, by, cx, cy) {
   let v = (dot00 * dot12 - dot01 * dot02) * invDenom;
 
   return (u >= 0) && (v >= 0) && (u + v < 1);
+}
+
+// Calcule la distance entre un point (px, py) et un segment [A, B]
+function pointToSegmentDistance(px, py, ax, ay, bx, by) {
+  const l2 = (bx - ax) ** 2 + (by - ay) ** 2;
+  if (l2 === 0) return distance(px, py, ax, ay);
+  let t = ((px - ax) * (bx - ax) + (py - ay) * (by - ay)) / l2;
+  t = Math.max(0, Math.min(1, t)); // Restreint la projection strictement sur le segment
+  const projX = ax + t * (bx - ax);
+  const projY = ay + t * (by - ay);
+  return distance(px, py, projX, projY);
 }
 
 // Applique le matériau sélectionné au triangle survolé
@@ -277,6 +297,12 @@ function generateMesh(target) {
     syncVelocityInputs();
   }
 
+  // Déverrouille le bouton de bascule du maillage dès qu'un maillage existe
+  const btnToggleMesh = document.getElementById("btn-toggle-mesh");
+  if (btnToggleMesh) {
+    btnToggleMesh.disabled = false;
+  }
+
   redraw();
 }
 
@@ -284,16 +310,11 @@ function generateMesh(target) {
 document.getElementById("input-vx")?.addEventListener("input", syncVelocityFromInputs);
 document.getElementById("input-vy")?.addEventListener("input", syncVelocityFromInputs);
 
-
 // --- Événements Interface (Boutons) ---
-document.getElementById("btn-draw-blade")?.addEventListener("click", () => { appState.mode = "draw_blade"; });
-document.getElementById("btn-draw-obs")?.addEventListener("click", () => { appState.mode = "draw_obstacle"; });
 document.getElementById("btn-toggle-mesh")?.addEventListener("click", () => {
   appState.showMeshLines = !appState.showMeshLines;
   redraw();
 });
-document.getElementById("btn-sim")?.addEventListener("click", runSimulation);
-
 
 // --- Événements Interface (Menu déroulant) ---
 document.getElementById("select-tool")?.addEventListener("change", (e) => {
@@ -311,8 +332,18 @@ canvas.addEventListener("mousedown", e => {
 
   if (appState.mode === "simulation") return;
 
-  saveState(); // ➔ PHOTO DE L'ÉTAT AVANT TOUTE MODIFICATION
+  // 1. PRIORITÉ ABSOLUE : Interaction avec la flèche cinématique (Vecteur vitesse)
+  if (blade.isClosed && blade.kinematics.velocity) {
+    const v = blade.kinematics.velocity;
+    if (distance(mx, my, v.endX, v.endY) < 15) {
+      appState.draggingVelocity = true;
+      return; // On stoppe l'exécution ici, on ne dessine rien
+    }
+  }
 
+  saveState();
+
+  // 2. Outils de Tracé
   if (appState.mode === "draw_blade" || appState.mode === "draw_obstacle") {
     const target = appState.mode === "draw_blade" ? blade : obstacle;
     if (!target.isClosed) {
@@ -325,6 +356,35 @@ canvas.addEventListener("mousedown", e => {
       }
     }
   } 
+  // 3. Outil : Insérer un point
+  else if (appState.mode === "insert") {
+    for (let target of [blade, obstacle]) {
+      if (!target.isClosed) continue;
+      
+      let minDist = 15; // Seuil de détection (pixels)
+      let bestIndex = -1;
+      
+      // Recherche de l'arête la plus proche
+      for (let i = 0; i < target.contour.length; i++) {
+        let p1 = target.contour[i];
+        let p2 = target.contour[(i + 1) % target.contour.length];
+        let d = pointToSegmentDistance(mx, my, p1.x, p1.y, p2.x, p2.y);
+        
+        if (d < minDist) {
+          minDist = d;
+          bestIndex = i;
+        }
+      }
+      
+      if (bestIndex !== -1) {
+        // Insère le nouveau point juste après l'index trouvé
+        target.contour.splice(bestIndex + 1, 0, { x: mx, y: my });
+        generateMesh(target); // Remaillage immédiat
+        break; // Un seul ajout à la fois
+      }
+    }
+  }
+  // 4. Outil : Déplacer
   else if (appState.mode === "move") {
     const closest = findClosestPoint(mx, my);
     if (closest) {
@@ -332,14 +392,16 @@ canvas.addEventListener("mousedown", e => {
       appState.activeTarget = closest.target;
     }
   } 
+  // 5. Outil : Gommer
   else if (appState.mode === "erase") {
     const closest = findClosestPoint(mx, my);
     if (closest) {
       closest.target.contour.splice(closest.index, 1);
-      if (closest.target.isClosed) generateMesh(closest.target); // Remaillage automatique
+      if (closest.target.isClosed) generateMesh(closest.target);
       redraw();
     }
   } 
+  // 6. Outil : Peindre
   else if (appState.mode === "paint") {
     paintTriangleAt(mx, my);
   }
@@ -350,7 +412,16 @@ canvas.addEventListener("mousemove", e => {
   const mx = e.clientX - rect.left;
   const my = e.clientY - rect.top;
 
-  // Outil Déplacer
+  // Déplacement exclusif de la flèche de vitesse
+  if (appState.draggingVelocity && blade.kinematics.velocity) {
+    blade.kinematics.velocity.endX = mx;
+    blade.kinematics.velocity.endY = my;
+    syncVelocityInputs();
+    redraw();
+    return;
+  }
+
+  // Outil Déplacer un point géométrique
   if (appState.mode === "move" && appState.draggedPoint) {
     appState.draggedPoint.x = mx;
     appState.draggedPoint.y = my;
@@ -364,6 +435,7 @@ canvas.addEventListener("mousemove", e => {
 });
 
 window.addEventListener("mouseup", () => {
+  appState.draggingVelocity = false;
   appState.draggedPoint = null;
   appState.activeTarget = null;
 });
@@ -533,18 +605,23 @@ function updateDataPanel() {
 
 // --- Communication Client-Serveur (API) ---
 async function runSimulation() {
-  // Validation des prérequis géométriques
+  // 1. Vérification de la géométrie
   if (!blade.isClosed || blade.mesh.elements.length === 0) {
     alert("Erreur : La géométrie de la lame doit être fermée et maillée.");
     return;
   }
 
-  // Construction stricte du payload JSON
+  // 2. Vérification de la connexion
+  if (!wsConnection || wsConnection.readyState !== WebSocket.OPEN) {
+    alert("Erreur : Le serveur n'est pas connecté.");
+    return;
+  }
+
+  // 3. Construction du payload
   const payload = {
     blade: {
       mesh: {
         vertices: blade.mesh.vertices.map(v => ({ x: v.x, y: v.y })),
-        // On envoie désormais les éléments avec leurs matériaux au serveur
         elements: blade.mesh.elements 
       },
       kinematics: {
@@ -555,39 +632,21 @@ async function runSimulation() {
           endY: blade.kinematics.velocity.endY
         }
       }
+    },
+    obstacle: {
+      mesh: {
+        vertices: obstacle.mesh.vertices.map(v => ({ x: v.x, y: v.y })),
+        elements: obstacle.mesh.elements 
+      }
     }
   };
 
-  try {
-    // Exécution de la requête asynchrone vers le serveur local
-    const response = await fetch("http://127.0.0.1:8000/api/simulate", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(payload)
-    });
-
-    // Vérification du code de statut HTTP
-    if (!response.ok) {
-      throw new Error(`Code d'erreur HTTP : ${response.status}`);
-    }
-
-    // Désérialisation de la réponse JSON
-    const data = await response.json();
-    
-    // Stockage des résultats dans le modèle de données
-    blade.physics.stresses = data.stresses;
-    console.log("Calculs réceptionnés :", blade.physics.stresses);
-
-    // Basculement de l'état de l'application et mise à jour visuelle
-    appState.mode = "simulation";
-    redraw();
-
-  } catch (error) {
-    console.error("Échec de la communication avec le solveur :", error);
-    alert("Erreur de connexion au solveur Python. Vérifiez que Uvicorn est en cours d'exécution.");
-  }
+  // 4. Envoi instantané via le tunnel WebSocket
+  wsConnection.send(JSON.stringify(payload));
+  
+  // 5. Basculement de l'interface
+  appState.mode = "simulation";
+  redraw();
 }
 
 // --- Moteur Colorimétrique ---
@@ -598,43 +657,43 @@ function getStressColor(stress, maxStress, baseColor) {
   return `hsla(${(1 - ratio) * 60}, 100%, 50%, 0.85)`;
 }
 
-// --- Protocole WebSocket et Timeline ---
+
 function connectSimulationStream() {
   const statusIndicator = document.getElementById("ws-status");
   
-  // Remplacer l'URL plus tard par la vraie adresse de votre serveur Python
+  if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+    return; // Déjà connecté
+  }
+
+  statusIndicator.textContent = "● Connexion en cours...";
+  statusIndicator.style.color = "#ffc107"; // Jaune
+
   wsConnection = new WebSocket("ws://localhost:8000/stream");
 
   wsConnection.onopen = () => {
-    statusIndicator.textContent = "● Connecté (Calcul en cours...)";
-    statusIndicator.style.color = "#28a745"; 
-    appState.mode = "simulation"; 
+    statusIndicator.textContent = "● Connecté (Prêt pour l'envoi)";
+    statusIndicator.style.color = "#28a745"; // Vert
     
-    // NOUVEAU : Envoi du payload géométrique dès l'ouverture du canal
-    const payload = {
-      blade: blade,
-      obstacle: obstacle
-    };
-    wsConnection.send(JSON.stringify(payload));
+    // NOUVEAU : Activation du bouton d'envoi uniquement ici !
+    const btnSim = document.getElementById("btn-sim");
+    if (btnSim) {
+      btnSim.disabled = false;
+      btnSim.style.opacity = "1";
+    }
   };
 
   wsConnection.onmessage = (event) => {
-    // 1. Sauvegarde des données
     const frameData = JSON.parse(event.data);
     simulationBuffer.push(frameData);
     
-    // 2. Mise à jour de l'interface
-    statusIndicator.textContent = "● Flux actif";
+    statusIndicator.textContent = "● Calcul en cours...";
     statusIndicator.style.color = "#007bff"; // Bleu
     document.getElementById("buffer-size").textContent = `${simulationBuffer.length} frames`;
     
-    // 3. Déverrouillage et extension de la timeline
     const slider = document.getElementById("sim-slider");
     slider.disabled = false;
     slider.max = simulationBuffer.length - 1;
     
-    // 4. Auto-scroll : si l'utilisateur regarde la dernière frame, 
-    // le curseur avance tout seul avec les nouvelles données
     if (parseInt(slider.value) >= simulationBuffer.length - 2) {
       slider.value = simulationBuffer.length - 1;
       currentFrameIndex = simulationBuffer.length - 1;
@@ -645,6 +704,8 @@ function connectSimulationStream() {
   wsConnection.onerror = () => {
     statusIndicator.textContent = "● Erreur réseau";
     statusIndicator.style.color = "#dc3545"; // Rouge
+    // On re-verrouille le bouton si la connexion plante
+    if (document.getElementById("btn-sim")) document.getElementById("btn-sim").disabled = true;
   };
 }
 
@@ -663,6 +724,7 @@ function updateTimelineUI() {
 
 // --- Écouteurs pour la timeline ---
 document.getElementById("btn-start-stream")?.addEventListener("click", connectSimulationStream);
+document.getElementById("btn-sim")?.addEventListener("click", runSimulation);
 document.getElementById("sim-slider")?.addEventListener("input", (e) => {
   currentFrameIndex = parseInt(e.target.value);
   updateTimelineUI();

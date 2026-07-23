@@ -9,16 +9,11 @@
 </head>
 <body>
   <h1>BladeSim</h1>
-  
-  <div id="controls">
-    <button id="btn-draw-blade" style="background-color: #007bff; color: white;">Tracer Lame</button>
-    <button id="btn-draw-obs" style="background-color: #17a2b8; color: white;">Tracer Obstacle</button>
-    <button id="btn-toggle-mesh" style="background-color: #6c757d; color: white;">Masquer/Afficher Traits</button>
-    <button id="btn-sim" style="background-color: #28a745; color: white;">Mode Simulation</button>
-  </div>
     <div id="history-controls" style="margin-bottom: 10px; display: flex; gap: 10px;">
     <button id="btn-undo" disabled style="padding: 5px 15px; cursor: pointer;">⟲ Annuler (Ctrl+Z)</button>
     <button id="btn-redo" disabled style="padding: 5px 15px; cursor: pointer;">⟳ Rétablir (Ctrl+Y)</button>
+    <button id="btn-toggle-mesh" disabled style="padding: 5px 15px; cursor: pointer;">Masquer/Afficher Traits</button>
+    <button id="btn-sim" disabled style="padding: 5px 15px; cursor: pointer;">Envoie de la Simulation</button>
   </div>
   <!-- Panneau de contrôle de la simulation (Timeline) -->
   <div id="timeline-container" style="display: flex; align-items: center; gap: 15px; margin-top: 10px; padding: 10px; background: #f8f9fa; border: 1px solid #ccc; border-radius: 5px;">
@@ -44,6 +39,7 @@
     <select id="select-tool" style="padding: 5px;">
       <option value="draw_blade">✎ Tracer (Hache entière)</option>
       <option value="draw_obstacle">✎ Tracer (Bûche)</option>
+      <option value="insert">⊕ Insérer un point (sur un bord)</option>
       <option value="move">✥ Déplacer un point</option>
       <option value="erase">⌫ Gommer un point</option>
       <option value="paint">🖌 Peindre un matériau</option>

@@ -1,7 +1,10 @@
 body {
   font-family: sans-serif;
-  background: #eee;
+  background: #e9e9e9;
   text-align: center;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
 }
 
 h1 {
