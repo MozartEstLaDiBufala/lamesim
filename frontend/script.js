@@ -11,8 +11,11 @@ const materialsDB = {
 let blade = {
   type: "blade",
   contour: [],
+  regions: [],       // Stocke les sous-zones (tableaux d'index)
+  internalEdges: [], // Stocke les segments internes pour l'affichage
+  fixations: [], // Stocke les coordonnées des rectangles {x, y, w, h}
   isClosed: false,
-  mesh: { vertices: [], elements: [] }, // "elements" remplace "triangles"
+  mesh: { vertices: [], elements: [] },
   physics: { centroid: { x: 0, y: 0 }, area: 0, mass: 1.0, stresses: [] },
   kinematics: { velocity: null }
 };
@@ -20,6 +23,8 @@ let blade = {
 let obstacle = {
   type: "obstacle",
   contour: [],
+  regions: [],
+  internalEdges: [],
   isClosed: false,
   mesh: { vertices: [], elements: [] },
   physics: { centroid: { x: 0, y: 0 }, area: 0, mass: 0 }
@@ -31,7 +36,9 @@ const appState = {
   currentMaterial: "steel",
   showMeshLines: true,
   draggedPoint: null, // Référence au point en cours de déplacement
-  activeTarget: null  // Entité affectée par le déplacement
+  activeTarget: null,  // Entité affectée par le déplacement
+  segmentStart: null, // Mémoire du 1er point cliqué pour le segment
+  fixationStart: null // Point d'origine du rectangle de fixation
 };
 
 
@@ -261,33 +268,49 @@ function syncVelocityFromInputs() {
   redraw();
 }
 
-// --- Algorithme de Maillage et Physique ---
 function generateMesh(target) {
-  if (target.contour.length < 3) return;
+  if (target.contour.length < 3) {
+    target.mesh.vertices = [];
+    target.mesh.elements = [];
+    return;
+  }
 
-  const flatCoords = [];
-  target.contour.forEach(p => {
-    flatCoords.push(p.x, p.y);
-  });
+  if (!target.regions || target.regions.length === 0) {
+    target.regions = [Array.from({length: target.contour.length}, (_, i) => i)];
+  }
 
-  const trianglesIndices = earcut(flatCoords);
   target.mesh.vertices = [...target.contour];
   target.mesh.elements = [];
   
-  for (let i = 0; i < trianglesIndices.length; i += 3) {
-    target.mesh.elements.push({
-      nodes: [trianglesIndices[i], trianglesIndices[i+1], trianglesIndices[i+2]],
-      material: "steel" // Matériau par défaut au maillage
+  target.regions.forEach(regionIndices => {
+    const flatCoords = [];
+    regionIndices.forEach(idx => {
+      if (target.contour[idx]) {
+        flatCoords.push(target.contour[idx].x, target.contour[idx].y);
+      }
     });
-  }
-  
+
+    if (flatCoords.length < 6) return; // Sécurité : minimum 3 points
+
+    const earcutIndices = earcut(flatCoords);
+    
+    for (let i = 0; i < earcutIndices.length; i += 3) {
+      target.mesh.elements.push({
+        nodes: [
+          regionIndices[earcutIndices[i]],
+          regionIndices[earcutIndices[i+1]],
+          regionIndices[earcutIndices[i+2]]
+        ],
+        material: "steel"
+      });
+    }
+  });
 
   const centroidData = calculateCentroid(target.contour);
   target.physics.centroid = { x: centroidData.x, y: centroidData.y };
   target.physics.area = centroidData.area;
 
-  // L'initialisation du vecteur cinématique est strictement réservée à la lame
-  if (target.type === "blade") {
+  if (target.type === "blade" && !target.kinematics.velocity) {
     target.kinematics.velocity = {
       startX: target.physics.centroid.x,
       startY: target.physics.centroid.y,
@@ -295,12 +318,6 @@ function generateMesh(target) {
       endY: target.physics.centroid.y + 100 
     };
     syncVelocityInputs();
-  }
-
-  // Déverrouille le bouton de bascule du maillage dès qu'un maillage existe
-  const btnToggleMesh = document.getElementById("btn-toggle-mesh");
-  if (btnToggleMesh) {
-    btnToggleMesh.disabled = false;
   }
 
   redraw();
@@ -377,10 +394,12 @@ canvas.addEventListener("mousedown", e => {
       }
       
       if (bestIndex !== -1) {
-        // Insère le nouveau point juste après l'index trouvé
         target.contour.splice(bestIndex + 1, 0, { x: mx, y: my });
-        generateMesh(target); // Remaillage immédiat
-        break; // Un seul ajout à la fois
+        // Sécurité : on supprime les découpes internes si on change le périmètre
+        target.regions = []; 
+        target.internalEdges = [];
+        generateMesh(target);
+        break; //un seul a la fois
       }
     }
   }
@@ -393,15 +412,71 @@ canvas.addEventListener("mousedown", e => {
     }
   } 
   // 5. Outil : Gommer
+  // 5. Outil : Gommer (Segments ou Points)
   else if (appState.mode === "erase") {
-    const closest = findClosestPoint(mx, my);
+    // A. Priorité 1 : Clic sur un segment interne -> supprime uniquement ce segment
+    const closestEdge = findClosestInternalEdge(mx, my, 12);
+    if (closestEdge) {
+      closestEdge.target.internalEdges.splice(closestEdge.index, 1);
+      rebuildRegionsFromEdges(closestEdge.target);
+      generateMesh(closestEdge.target);
+      redraw();
+      return;
+    }
+
+    // B. Priorité 2 : Clic sur un point du contour -> supprime le point et réajuste les index
+    const closest = findClosestPoint(mx, my, 15);
     if (closest) {
-      closest.target.contour.splice(closest.index, 1);
-      if (closest.target.isClosed) generateMesh(closest.target);
+      const target = closest.target;
+      const removeIdx = closest.index;
+
+      target.contour.splice(removeIdx, 1);
+
+      if (target.contour.length < 3) {
+        // La géométrie devient incomplète : réinitialisation propre de l'état
+        target.isClosed = false;
+        target.regions = [];
+        target.internalEdges = [];
+        target.mesh.vertices = [];
+        target.mesh.elements = [];
+      } else if (target.isClosed) {
+        // Réalignement des index des segments restants (> removeIdx)
+        if (target.internalEdges) {
+          target.internalEdges = target.internalEdges
+            .filter(e => e.p1 !== removeIdx && e.p2 !== removeIdx)
+            .map(e => ({
+              p1: e.p1 > removeIdx ? e.p1 - 1 : e.p1,
+              p2: e.p2 > removeIdx ? e.p2 - 1 : e.p2
+            }));
+        }
+        rebuildRegionsFromEdges(target);
+        generateMesh(target);
+      }
       redraw();
     }
-  } 
-  // 6. Outil : Peindre
+  }
+  // Outil : Ajouter un segment de séparation
+  else if (appState.mode === "add_segment") {
+    const closest = findClosestPoint(mx, my, 15);
+    if (closest && closest.target.isClosed) {
+      if (!appState.segmentStart) {
+        // Premier clic : on mémorise le point
+        appState.segmentStart = closest;
+        redraw();
+      } else {
+        // Second clic : on relie si c'est sur la même entité
+        if (appState.segmentStart.target === closest.target) {
+          splitRegion(closest.target, appState.segmentStart.index, closest.index);
+        }
+        appState.segmentStart = null; // On réinitialise
+        redraw();
+      }
+    } else {
+      appState.segmentStart = null; // Annulation si clic dans le vide
+      redraw();
+    }
+  }
+  // Outil : Peindre
   else if (appState.mode === "paint") {
     paintTriangleAt(mx, my);
   }
@@ -469,9 +544,21 @@ function drawEntity(target) {
     }
     if (target.isClosed) ctx.closePath();
     ctx.stroke();
+
+    // Dessin des segments internes
+    if (target.internalEdges && target.internalEdges.length > 0) {
+      ctx.strokeStyle = target.type === "blade" ? "#666" : "#004085";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      target.internalEdges.forEach(edge => {
+        ctx.moveTo(contourToDraw[edge.p1].x, contourToDraw[edge.p1].y);
+        ctx.lineTo(contourToDraw[edge.p2].x, contourToDraw[edge.p2].y);
+      });
+      ctx.stroke();
+    }
     
     // Nœuds de contrôle (Visibles uniquement pendant le tracé, pas en simulation)
-    if (!target.isClosed && appState.mode !== "simulation") {
+    if ((!target.isClosed || appState.showMeshLines) && appState.mode !== "simulation") {
       ctx.fillStyle = target.type === "blade" ? "blue" : "darkcyan";
       contourToDraw.forEach(p => {
         ctx.beginPath();
@@ -537,7 +624,13 @@ function redraw() {
     ctx.fillStyle = "red";
     ctx.fill();
   }
-
+  // Indication visuelle de l'outil Segment
+  if (appState.mode === "add_segment" && appState.segmentStart) {
+    ctx.fillStyle = "orange";
+    ctx.beginPath();
+    ctx.arc(appState.segmentStart.point.x, appState.segmentStart.point.y, 6, 0, Math.PI * 2);
+    ctx.fill();
+  }
   updateDataPanel();
 }
 
@@ -761,3 +854,78 @@ document.getElementById("btn-edit")?.addEventListener("click", () => {
   // 3. On redessine le canevas
   redraw();
 });
+
+// Détecte si la souris survole un segment interne
+function findClosestInternalEdge(mx, my, threshold = 12) {
+  for (let target of [blade, obstacle]) {
+    if (!target.isClosed || !target.internalEdges) continue;
+    for (let i = 0; i < target.internalEdges.length; i++) {
+      let edge = target.internalEdges[i];
+      let p1 = target.contour[edge.p1];
+      let p2 = target.contour[edge.p2];
+      if (p1 && p2) {
+        let d = pointToSegmentDistance(mx, my, p1.x, p1.y, p2.x, p2.y);
+        if (d < threshold) {
+          return { target: target, index: i };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+// Subdivise une région géométrique
+function splitRegionWithoutAddingEdge(target, index1, index2) {
+  for (let r = 0; r < target.regions.length; r++) {
+    const region = target.regions[r];
+    const pos1 = region.indexOf(index1);
+    const pos2 = region.indexOf(index2);
+
+    if (pos1 !== -1 && pos2 !== -1) {
+      const minPos = Math.min(pos1, pos2);
+      const maxPos = Math.max(pos1, pos2);
+
+      if (maxPos - minPos <= 1 || (minPos === 0 && maxPos === region.length - 1)) {
+        return false;
+      }
+
+      const regionA = [];
+      for(let i = 0; i <= minPos; i++) regionA.push(region[i]);
+      for(let i = maxPos; i < region.length; i++) regionA.push(region[i]);
+
+      const regionB = [];
+      for(let i = minPos; i <= maxPos; i++) regionB.push(region[i]);
+
+      target.regions.splice(r, 1, regionA, regionB);
+      return true;
+    }
+  }
+  return false;
+}
+
+// Ajoute un segment et re-maille
+function splitRegion(target, index1, index2) {
+  if (splitRegionWithoutAddingEdge(target, index1, index2)) {
+    target.internalEdges.push({ p1: index1, p2: index2 });
+    generateMesh(target);
+  }
+}
+
+// Reconstruit proprement les sous-zones après suppression d'un point ou d'un segment
+function rebuildRegionsFromEdges(target) {
+  if (target.contour.length < 3) {
+    target.regions = [];
+    return;
+  }
+  target.regions = [Array.from({length: target.contour.length}, (_, i) => i)];
+
+  const validEdges = [];
+  if (target.internalEdges) {
+    for (let edge of target.internalEdges) {
+      if (splitRegionWithoutAddingEdge(target, edge.p1, edge.p2)) {
+        validEdges.push(edge);
+      }
+    }
+  }
+  target.internalEdges = validEdges;
+}
