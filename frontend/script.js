@@ -476,6 +476,12 @@ canvas.addEventListener("mousedown", e => {
       redraw();
     }
   }
+  // Outil : Ajouter une main de fixation
+  else if (appState.mode === "fixation") {
+    if (blade.isClosed) {
+      appState.fixationStart = { x: mx, y: my };
+    }
+  }
   // Outil : Peindre
   else if (appState.mode === "paint") {
     paintTriangleAt(mx, my);
@@ -507,9 +513,43 @@ canvas.addEventListener("mousemove", e => {
   else if (appState.mode === "paint" && e.buttons === 1) {
     paintTriangleAt(mx, my);
   }
+
+  // Outil : Dessiner le rectangle de fixation en temps réel
+  else if (appState.mode === "fixation" && appState.fixationStart) {
+    redraw(); // Efface l'image précédente
+    
+    const rectX = appState.fixationStart.x;
+    const rectY = appState.fixationStart.y;
+    const rectW = mx - rectX;
+    const rectH = my - rectY;
+
+    ctx.fillStyle = "rgba(0, 255, 0, 0.3)";
+    ctx.strokeStyle = "rgba(0, 200, 0, 0.8)";
+    ctx.lineWidth = 1;
+    ctx.fillRect(rectX, rectY, rectW, rectH);
+    ctx.strokeRect(rectX, rectY, rectW, rectH);
+  }
 });
 
-window.addEventListener("mouseup", () => {
+window.addEventListener("mouseup", (e) => {
+  // 1. Recalcul indispensable de la position de la souris pour cet événement
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  // 2. Validation du rectangle de fixation
+  if (appState.mode === "fixation" && appState.fixationStart) {
+    blade.fixations.push({
+      x: appState.fixationStart.x,
+      y: appState.fixationStart.y,
+      w: mx - appState.fixationStart.x,
+      h: my - appState.fixationStart.y
+    });
+    appState.fixationStart = null; // On libère l'outil
+    redraw(); // Affichage définitif du rectangle
+  }
+  
+  // 3. Libération des autres outils
   appState.draggingVelocity = false;
   appState.draggedPoint = null;
   appState.activeTarget = null;
@@ -593,6 +633,33 @@ function drawEntity(target) {
       if (appState.showMeshLines) {
         ctx.strokeStyle = target.type === "blade" ? "#999" : "#87CEFA";
         ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+    });
+  }
+  // 4. Dessin des Fixations (Uniquement pour la lame)
+  if (target.type === "blade" && target.fixations && target.fixations.length > 0) {
+    target.fixations.forEach(rect => {
+      ctx.fillStyle = "rgba(0, 255, 0, 0.2)";
+      ctx.strokeStyle = "rgba(0, 200, 0, 0.5)";
+      ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+      ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+    });
+
+    // Identification visuelle des nœuds verrouillés
+    ctx.fillStyle = "lime";
+    meshVertices.forEach(v => {
+      let isFixed = false;
+      for (let rect of target.fixations) {
+        if (isPointInRect(v.x, v.y, rect)) {
+          isFixed = true;
+          break;
+        }
+      }
+      if (isFixed) {
+        ctx.beginPath();
+        ctx.arc(v.x, v.y, 4, 0, Math.PI * 2);
+        ctx.fill();
         ctx.stroke();
       }
     });
@@ -717,6 +784,17 @@ async function runSimulation() {
     slider.value = 0;
     slider.max = 0;
   }
+
+  // Détermination des index des nœuds fixés
+  const fixedNodesIndices = [];
+  blade.mesh.vertices.forEach((v, index) => {
+    for (let rect of blade.fixations) {
+      if (isPointInRect(v.x, v.y, rect)) {
+        fixedNodesIndices.push(index);
+        break;
+      }
+    }
+  }); 
   // -------------------------------------------------------------------
 
   // 3. Construction du payload
@@ -725,6 +803,9 @@ async function runSimulation() {
       mesh: {
         vertices: blade.mesh.vertices.map(v => ({ x: v.x, y: v.y })),
         elements: blade.mesh.elements 
+      },
+      boundary_conditions: {
+        fixed_nodes: fixedNodesIndices // Transmission des encastrements
       },
       kinematics: {
         velocity: {
@@ -928,4 +1009,15 @@ function rebuildRegionsFromEdges(target) {
     }
   }
   target.internalEdges = validEdges;
+}
+
+// Évalue si un point (px, py) est contenu dans un rectangle
+function isPointInRect(px, py, rect) {
+  // Prise en compte des tracés inversés (largeur/hauteur négatives)
+  const minX = Math.min(rect.x, rect.x + rect.w);
+  const maxX = Math.max(rect.x, rect.x + rect.w);
+  const minY = Math.min(rect.y, rect.y + rect.h);
+  const maxY = Math.max(rect.y, rect.y + rect.h);
+
+  return px >= minX && px <= maxX && py >= minY && py <= maxY;
 }
