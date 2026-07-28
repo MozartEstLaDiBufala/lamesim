@@ -55,6 +55,69 @@ const historyManager = {
   maxSize: 30 // Limite pour éviter la saturation de la mémoire vive
 };
 
+// --- Système de Sauvegarde (Export JSON) ---
+document.getElementById("btn-save")?.addEventListener("click", () => {
+  // On regroupe les entités à sauvegarder
+  const projectData = {
+    blade: blade,
+    obstacle: obstacle
+  };
+
+  // Conversion en texte JSON formaté
+  const dataString = JSON.stringify(projectData, null, 2);
+  
+  // Création d'un fichier virtuel
+  const blob = new Blob([dataString], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  
+  // Déclenchement automatique du téléchargement
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "projet_hache.json";
+  a.click();
+  
+  // Nettoyage de la mémoire
+  URL.revokeObjectURL(url);
+});
+
+// --- Système de Chargement (Import JSON) ---
+// 1. Le clic sur le bouton simule un clic sur l'input type="file" invisible
+document.getElementById("btn-load")?.addEventListener("click", () => {
+  document.getElementById("input-load").click(); 
+});
+
+// 2. Traitement du fichier une fois sélectionné
+document.getElementById("input-load")?.addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = (event) => {
+    try {
+      const parsedData = JSON.parse(event.target.result);
+      
+      // Injection des données dans le modèle
+      if (parsedData.blade) blade = parsedData.blade;
+      if (parsedData.obstacle) obstacle = parsedData.obstacle;
+      
+      // Réinitialisation de l'historique pour éviter les conflits d'état
+      historyManager.undoStack = [];
+      historyManager.redoStack = [];
+      updateHistoryUI();
+      
+      redraw();
+      console.log("Projet chargé avec succès.");
+      
+    } catch (error) {
+      console.error("Fichier corrompu ou format invalide :", error);
+      alert("Erreur lors de la lecture du fichier de sauvegarde.");
+    }
+  };
+  
+  reader.readAsText(file);
+  e.target.value = ""; // Réinitialise l'input pour permettre de recharger le même fichier
+});
+
 // Fonction de capture d'état
 function saveState() {
   // On photographie explicitement les variables utilisées par votre code actuel

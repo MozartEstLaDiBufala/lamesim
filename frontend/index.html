@@ -49,6 +49,13 @@
       <option value="fixation">🔒 Ajouter une main (Zone de fixation)</option>
     </select>
 
+    <!-- Boutons de Sauvegarde / Chargement -->
+    <div style="display: inline-block; margin-left: 20px;">
+      <button id="btn-save" style="cursor: pointer;">💾 Sauvegarder</button>
+      <button id="btn-load" style="cursor: pointer;">📂 Charger</button>
+      <!-- Input invisible requis pour ouvrir l'explorateur de fichiers -->
+      <input type="file" id="input-load" accept=".json" style="display: none;">
+    </div>
     <strong style="margin-left: 15px;">Matériau (Pinceau) :</strong>
     <select id="select-material" style="padding: 5px;">
       <option value="steel">Acier (Gris)</option>
