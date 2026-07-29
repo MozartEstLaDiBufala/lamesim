@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <title>Simulateur de forces - LameSim</title>
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="css/style.css" />
   <!-- Importation du générateur de maillage Earcut via CDN -->
   <script src="https://unpkg.com/earcut@2.2.4/dist/earcut.min.js"></script>
 </head>
@@ -12,7 +12,7 @@
     <div id="history-controls" style="margin-bottom: 10px; display: flex; gap: 10px;">
     <button id="btn-undo" disabled style="padding: 5px 15px; cursor: pointer;">⟲ Annuler (Ctrl+Z)</button>
     <button id="btn-redo" disabled style="padding: 5px 15px; cursor: pointer;">⟳ Rétablir (Ctrl+Y)</button>
-    <button id="btn-toggle-mesh" disabled style="padding: 5px 15px; cursor: pointer;">Masquer/Afficher Traits</button>
+    <button id="btn-toggle-mesh" style="padding: 5px 15px; cursor: pointer;">Masquer/Afficher Traits</button>
     <button id="btn-edit" style="padding: 5px 15px; cursor: pointer;">Mode Edition</button>
     <button id="btn-sim" disabled style="padding: 5px 15px; cursor: pointer;">Envoie de la Simulation</button>
 
@@ -78,10 +78,6 @@
           <label for="input-mass" style="font-size: 13px;">Masse (kg) :</label>
           <input type="number" id="input-mass" step="0.1" value="1.0" style="width: 60px; text-align: center;">
         </div>
-        
-        <button id="btn-calc-mass" style="width: 100%; font-size: 12px; padding: 5px; background-color: #e2e3e5; border: 1px solid #ced4da; cursor: pointer;">
-          Calcul Auto (Acier 5mm)
-        </button>
 
         <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
         <label for="input-vx" style="font-size: 13px;">Vitesse X (px/s) :</label>
@@ -103,6 +99,6 @@
 
   </div>
 
-  <script src="script.js"></script>
+  <script type="module" src="js/main.js"></script>
 </body>
 </html>
