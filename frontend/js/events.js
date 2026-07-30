@@ -44,18 +44,23 @@ function syncVelocityInputs() {
 }
 
 function paintTriangleAt(mx, my) {
-  if (!blade.isClosed) return;
-  const vertices = blade.mesh.vertices;
-  
-  for (let element of blade.mesh.elements) {
-    let p0 = vertices[element.nodes[0]];
-    let p1 = vertices[element.nodes[1]];
-    let p2 = vertices[element.nodes[2]];
+  // Itération séquentielle sur les entités disponibles
+  for (let target of [blade, obstacle]) {
+    if (!target.isClosed) continue;
     
-    if (isPointInTriangle(mx, my, p0.x, p0.y, p1.x, p1.y, p2.x, p2.y)) {
-      element.material = appState.currentMaterial;
-      redraw();
-      break; 
+    const vertices = target.mesh.vertices;
+    
+    for (let element of target.mesh.elements) {
+      let p0 = vertices[element.nodes[0]];
+      let p1 = vertices[element.nodes[1]];
+      let p2 = vertices[element.nodes[2]];
+      
+      // Vérification mathématique de la collision
+      if (isPointInTriangle(mx, my, p0.x, p0.y, p1.x, p1.y, p2.x, p2.y)) {
+        element.material = appState.currentMaterial;
+        redraw();
+        return; // Interruption immédiate pour ne peindre qu'un seul triangle, même en cas de superposition
+      }
     }
   }
 }
@@ -72,7 +77,19 @@ export function initEvents() {
   document.getElementById("btn-redo")?.addEventListener("click", redo);
   document.getElementById("btn-toggle-mesh")?.addEventListener("click", () => { appState.showMeshLines = !appState.showMeshLines; redraw(); });
   document.getElementById("select-tool")?.addEventListener("change", (e) => { appState.mode = e.target.value; });
-  document.getElementById("select-material")?.addEventListener("change", (e) => { appState.currentMaterial = e.target.value; });
+  document.getElementById("select-material")?.addEventListener("change", (e) => {
+    // 1. Mise à jour du matériau actif
+    appState.currentMaterial = e.target.value;
+    
+    // 2. Forçage de l'outil de peinture
+    appState.mode = "paint";
+    
+    // 3. Synchronisation de l'interface graphique (sélecteur d'outil)
+    const toolSelector = document.getElementById("select-tool");
+    if (toolSelector) {
+      toolSelector.value = "paint";
+    }
+  });
   document.getElementById("btn-start-stream")?.addEventListener("click", connectSimulationStream);
   document.getElementById("btn-sim")?.addEventListener("click", runSimulation);
   
@@ -94,7 +111,36 @@ export function initEvents() {
 
   document.getElementById("input-vx")?.addEventListener("input", syncVelocityFromInputs);
   document.getElementById("input-vy")?.addEventListener("input", syncVelocityFromInputs);
-  
+
+  // --- Édition manuelle des coordonnées depuis les tableaux de données ---
+  document.getElementById("data-content")?.addEventListener("input", (e) => {
+    // On vérifie que l'élément modifié est bien un de nos champs d'édition
+    if (e.target.classList.contains("coord-input")) {
+      const entityType = e.target.getAttribute("data-entity");
+      const idx = parseInt(e.target.getAttribute("data-index"));
+      const coord = e.target.getAttribute("data-coord");
+      const val = parseFloat(e.target.value);
+
+      // Sécurité : ignorer les saisies incomplètes (ex: le signe "-" seul)
+      if (isNaN(val)) return;
+
+      const target = entityType === "blade" ? blade : obstacle;
+      
+      if (target.contour[idx]) {
+        // Mise à jour de la coordonnée dans le modèle
+        target.contour[idx][coord] = val;
+
+        // Si l'utilisateur modifie X ou Y, la géométrie change, il faut remailler
+        if ((coord === 'x' || coord === 'y') && target.isClosed) {
+          generateMesh(target);
+        }
+        
+        // Rafraîchissement du canvas graphique
+        redraw();
+      }
+    }
+  });
+
   // --- Système de Sauvegarde (Export JSON) ---
   document.getElementById("btn-save")?.addEventListener("click", () => {
     const projectData = { blade, obstacle };

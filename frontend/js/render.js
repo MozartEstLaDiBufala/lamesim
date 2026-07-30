@@ -205,6 +205,11 @@ function drawEntity(target) {
 }
 
 // --- Génération de l'interface des données ---
+
+// Mémoire d'état pour éviter les reconstructions HTML inutiles
+let previousBladeCount = -1;
+let previousObstacleCount = -1;
+
 function generateEntityTable(entity, title) {
   if (entity.contour.length === 0) {
     return `
@@ -219,7 +224,6 @@ function generateEntityTable(entity, title) {
     <div style="margin-bottom: 15px;">
       <h4 style="margin: 0 0 5px 0; color: #333;">${title}</h4>
       <p style="font-size: 13px; margin: 2px 0;"><strong>Statut:</strong> ${entity.isClosed ? "Géométrie fermée" : "En cours de tracé"}</p>
-      <p style="font-size: 13px; margin: 2px 0 10px 0;"><strong>Triangles:</strong> ${entity.mesh.elements.length}</p>
       
       <table style="width: 100%; border-collapse: collapse; font-size: 13px; text-align: center;">
         <thead>
@@ -234,24 +238,25 @@ function generateEntityTable(entity, title) {
   `;
 
   entity.contour.forEach((p, index) => {
-    // Récupération de l'épaisseur avec une valeur par défaut de 1.0 si non définie
-    let thickness = p.t !== undefined ? p.t.toFixed(1) : "1.0";
+    let t = p.t !== undefined ? p.t : 1.0;
     
+    // Ajout des attributs "data-*" pour identifier facilement la cible lors de l'édition
     html += `
           <tr>
             <td style="padding: 4px; border: 1px solid #eee;">n°${index}</td>
-            <td style="padding: 4px; border: 1px solid #eee;">${Math.round(p.x)}</td>
-            <td style="padding: 4px; border: 1px solid #eee;">${Math.round(p.y)}</td>
-            <td style="padding: 4px; border: 1px solid #eee;">${thickness}</td>
+            <td style="padding: 4px; border: 1px solid #eee;">
+              <input type="number" step="0.1" class="coord-input" data-entity="${entity.type}" data-index="${index}" data-coord="x" value="${p.x.toFixed(1)}" style="width: 60px; text-align: center; border: 1px solid #ccc; border-radius: 3px;">
+            </td>
+            <td style="padding: 4px; border: 1px solid #eee;">
+              <input type="number" step="0.1" class="coord-input" data-entity="${entity.type}" data-index="${index}" data-coord="y" value="${p.y.toFixed(1)}" style="width: 60px; text-align: center; border: 1px solid #ccc; border-radius: 3px;">
+            </td>
+            <td style="padding: 4px; border: 1px solid #eee;">
+              <input type="number" step="0.1" class="coord-input" data-entity="${entity.type}" data-index="${index}" data-coord="t" value="${t.toFixed(1)}" style="width: 60px; text-align: center; border: 1px solid #ccc; border-radius: 3px;">
+            </td>
           </tr>`;
   });
 
-  html += `
-        </tbody>
-      </table>
-    </div>
-  `;
-  
+  html += `</tbody></table></div>`;
   return html;
 }
 
@@ -259,13 +264,37 @@ export function updateDataPanel() {
   const dataContent = document.getElementById("data-content");
   if (!dataContent) return;
 
-  // Concaténation des données des deux entités avec une ligne de séparation
-  let finalHtml = generateEntityTable(blade, "Données de la Lame");
-  finalHtml += `<hr style="border: 0; border-top: 1px solid #ccc; margin: 15px 0;">`;
-  finalHtml += generateEntityTable(obstacle, "Données de la Bûche");
+  // Si la structure (nombre de points) a changé, on recompile tout le HTML
+  if (blade.contour.length !== previousBladeCount || obstacle.contour.length !== previousObstacleCount) {
+    let finalHtml = generateEntityTable(blade, "Données de la Lame");
+    finalHtml += `<hr style="border: 0; border-top: 1px solid #ccc; margin: 15px 0;">`;
+    finalHtml += generateEntityTable(obstacle, "Données de la Bûche");
+    
+    dataContent.innerHTML = finalHtml;
+    
+    previousBladeCount = blade.contour.length;
+    previousObstacleCount = obstacle.contour.length;
+  } 
+  // Si la structure est identique, on se contente de mettre à jour les valeurs (Patching)
+  else {
+    const inputs = dataContent.querySelectorAll('.coord-input');
+    inputs.forEach(input => {
+      // Protection anti-saisie : on ne met pas à jour le champ si l'utilisateur est en train de taper dedans
+      if (document.activeElement === input) return;
 
-  // Injection dans le DOM
-  dataContent.innerHTML = finalHtml;
+      const entityType = input.getAttribute('data-entity');
+      const idx = parseInt(input.getAttribute('data-index'));
+      const coord = input.getAttribute('data-coord');
+      
+      const target = entityType === 'blade' ? blade : obstacle;
+      
+      if (target.contour[idx]) {
+        let val = target.contour[idx][coord];
+        if (val === undefined && coord === 't') val = 1.0; // Valeur par défaut pour l'épaisseur
+        if (val !== undefined) input.value = val.toFixed(1);
+      }
+    });
+  }
 }
 
 export function redraw() {

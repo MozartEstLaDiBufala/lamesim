@@ -20,11 +20,7 @@ canvas {
   display: block;
   margin-top: 20px;
   cursor: pointer;
-  position:relative; /* positionnement absolu par rapport à la fenêtre */
-  top: 0%;
-  left: 50%;
-  transform: translate(-50%, -0%); /* décale le body pour le centrer */
-
+  width: 100%;
 }
 
 /* Conteneur des contrôles */
@@ -88,7 +84,7 @@ input[type="number"] {
 }
 
 #info-panel {
-  width: 250px;
+  flex: 0 0 380px; /* 0 = ne grandit pas, 0 = ne rétrécit pas, 380px = taille de base */
   background: #f8f9fa;
   border: 1px solid #ccc;
   padding: 15px;
@@ -110,6 +106,7 @@ table {
   width: 100%;
   border-collapse: collapse;
   margin-top: 10px;
+  table-layout: fixed;
 }
 
 th, td {
