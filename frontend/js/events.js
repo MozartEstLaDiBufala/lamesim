@@ -80,6 +80,21 @@ export function initEvents() {
     simulationState.currentIndex = parseInt(e.target.value);
     updateTimelineUI();
   });
+
+  // Synchronisation des inputs HTML vers le modèle (flèche)
+  const syncVelocityFromInputs = () => {
+    const v = blade.kinematics.velocity;
+    if (!v) return;
+    const vx = parseFloat(document.getElementById("input-vx").value) || 0;
+    const vy = parseFloat(document.getElementById("input-vy").value) || 0;
+    v.endX = v.startX + vx;
+    v.endY = v.startY + vy;
+    redraw(); // Fonction importée depuis render.js
+  };
+
+  document.getElementById("input-vx")?.addEventListener("input", syncVelocityFromInputs);
+  document.getElementById("input-vy")?.addEventListener("input", syncVelocityFromInputs);
+  
   // --- Système de Sauvegarde (Export JSON) ---
   document.getElementById("btn-save")?.addEventListener("click", () => {
     const projectData = { blade, obstacle };
@@ -92,6 +107,11 @@ export function initEvents() {
     URL.revokeObjectURL(url);
   });
 
+  document.getElementById("input-thickness")?.addEventListener("input", (e) => {
+    appState.currentThickness = parseFloat(e.target.value);
+    document.getElementById("thickness-display").textContent = `${appState.currentThickness.toFixed(1)} cm`;
+  });
+    
   // --- Système de Chargement (Import JSON) ---
   document.getElementById("btn-load")?.addEventListener("click", () => {
     document.getElementById("input-load").click(); 
@@ -152,7 +172,7 @@ export function initEvents() {
           target.isClosed = true;
           generateMesh(target);
         } else {
-          target.contour.push({ x: mx, y: my });
+          target.contour.push({ x: mx, y: my, t: appState.currentThickness});
           redraw();
         }
       }
@@ -248,6 +268,13 @@ export function initEvents() {
           redraw();
           break; 
         }
+      }
+    }
+    else if (appState.mode === "thickness") {
+      const closest = findClosestPoint(mx, my, 15);
+      if (closest) {
+        closest.point.t = appState.currentThickness;
+        redraw();
       }
     }
   });
