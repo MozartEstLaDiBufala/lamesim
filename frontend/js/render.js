@@ -176,7 +176,7 @@ function drawEntity(target) {
   }
 
   // 5. DESSIN DES FIXATIONS
-  if (target.type === "blade" && target.fixations && target.fixations.length > 0) {
+  if (target.fixations && target.fixations.length > 0) {
     target.fixations.forEach(rect => {
       ctx.fillStyle = "rgba(0, 255, 0, 0.2)"; 
       ctx.strokeStyle = "rgba(0, 200, 0, 0.5)";
@@ -297,6 +297,81 @@ export function updateDataPanel() {
   }
 }
 
+function drawScaleRuler() {
+  const rulerLengthPx = 100; // 100 pixels = 10 cm
+  const label = "10 cm";
+  
+  const x = 20;
+  const y = canvas.height - 20;
+
+  ctx.strokeStyle = "#333";
+  ctx.fillStyle = "#333";
+  ctx.lineWidth = 2;
+  ctx.font = "14px sans-serif";
+  ctx.textAlign = "center";
+
+  // Ligne principale
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x + rulerLengthPx, y);
+  ctx.stroke();
+
+  // Tiques d'extrémité
+  ctx.beginPath();
+  ctx.moveTo(x, y - 5); ctx.lineTo(x, y + 5);
+  ctx.moveTo(x + rulerLengthPx, y - 5); ctx.lineTo(x + rulerLengthPx, y + 5);
+  ctx.stroke();
+
+  // Texte
+  ctx.fillText(label, x + rulerLengthPx / 2, y - 10);
+}
+
+function drawGraphicalScale() {
+  // Définition mathématique de l'échelle
+  const pixelsPerCm = 10; // 10 pixels = 1 cm (puisque 1 px = 1 mm)
+  const scaleLengthCm = 10; // On dessine une règle totale de 10 cm
+  const totalWidthPx = scaleLengthCm * pixelsPerCm;
+
+  // Position en bas à gauche du canevas
+  const startX = 20;
+  const startY = canvas.height - 30;
+
+  // 1. Fond semi-transparent pour garantir la lisibilité sur n'importe quel maillage
+  ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
+  ctx.fillRect(startX - 15, startY - 25, totalWidthPx + 35, 40);
+
+  // 2. Ligne horizontale principale
+  ctx.strokeStyle = "#222";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(startX, startY);
+  ctx.lineTo(startX + totalWidthPx, startY);
+  ctx.stroke();
+
+  // 3. Dessin des graduations
+  ctx.fillStyle = "#222";
+  ctx.font = "bold 11px sans-serif";
+  ctx.textAlign = "center";
+
+  for (let i = 0; i <= scaleLengthCm; i++) {
+    const xPos = startX + (i * pixelsPerCm);
+    
+    ctx.beginPath();
+    ctx.moveTo(xPos, startY);
+    
+    // Grande graduation et texte tous les 5 cm (0, 5, 10)
+    if (i % 5 === 0) {
+      ctx.lineTo(xPos, startY - 8); // Trait plus long
+      ctx.fillText(`${i} cm`, xPos, startY - 12); // Étiquette
+    } 
+    // Petite graduation pour chaque 1 cm
+    else {
+      ctx.lineTo(xPos, startY - 4); // Trait court
+    }
+    ctx.stroke();
+  }
+}
+
 export function redraw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   
@@ -312,4 +387,6 @@ export function redraw() {
   }
   
   updateDataPanel();
+  drawScaleRuler();
+  drawGraphicalScale();
 }

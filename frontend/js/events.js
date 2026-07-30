@@ -140,6 +140,13 @@ export function initEvents() {
       }
     }
   });
+  
+  // Synchronisation de la vitesse d'impact
+  document.getElementById("input-impact-speed")?.addEventListener("input", (e) => {
+    if (blade.kinematics) {
+      blade.kinematics.impactSpeed = parseFloat(e.target.value) || 0;
+    }
+  });
 
   // --- Système de Sauvegarde (Export JSON) ---
   document.getElementById("btn-save")?.addEventListener("click", () => {
@@ -286,7 +293,7 @@ export function initEvents() {
       }
     }
     else if (appState.mode === "fixation") {
-      if (blade.isClosed) {
+      if (blade.isClosed || obstacle.isClosed) {
         appState.fixationStart = { x: mx, y: my };
       }
     }
@@ -368,12 +375,24 @@ export function initEvents() {
     const my = e.clientY - rect.top;
 
     if (appState.mode === "fixation" && appState.fixationStart) {
-      blade.fixations.push({
-        x: appState.fixationStart.x,
-        y: appState.fixationStart.y,
-        w: mx - appState.fixationStart.x,
-        h: my - appState.fixationStart.y
-      });
+      // Normalisation du rectangle (permet de tracer de bas en haut ou droite à gauche)
+      const rect = {
+        x: Math.min(appState.fixationStart.x, mx),
+        y: Math.min(appState.fixationStart.y, my),
+        w: Math.abs(mx - appState.fixationStart.x),
+        h: Math.abs(my - appState.fixationStart.y)
+      };
+
+      // Initialisation sécurisée des tableaux et ajout du rectangle
+      if (blade.isClosed) {
+        if (!blade.fixations) blade.fixations = [];
+        blade.fixations.push(rect);
+      }
+      if (obstacle.isClosed) {
+        if (!obstacle.fixations) obstacle.fixations = [];
+        obstacle.fixations.push(rect);
+      }
+      
       appState.fixationStart = null; 
       redraw(); 
     }

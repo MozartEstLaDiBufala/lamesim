@@ -12,7 +12,7 @@ export const blade = {
   isClosed: false,
   mesh: { vertices: [], elements: [] },
   physics: { centroid: { x: 0, y: 0 }, area: 0, mass: 1.0, stresses: [] },
-  kinematics: { velocity: null }
+  kinematics: { velocity: null,   impactSpeed: 15.0 }
 };
 
 export const obstacle = {
