@@ -1,4 +1,4 @@
-import { appState, blade, obstacle, historyManager, overwriteState, simulationState } from './state.js';
+import { appState, blade, obstacle, historyManager, overwriteState, simulationState, simulationParams } from './state.js';
 import { canvas, ctx, redraw } from './render.js';
 import { runSimulation, connectSimulationStream, updateTimelineUI } from './network.js';
 import { distance, isPointInTriangle, pointToSegmentDistance } from './mathUtils.js';
@@ -97,6 +97,17 @@ export function initEvents() {
   document.getElementById("sim-slider")?.addEventListener("input", (e) => {
     simulationState.currentIndex = parseInt(e.target.value);
     updateTimelineUI();
+  });
+
+  // Synchronisation des paramètres temporels
+  document.getElementById("input-time-step")?.addEventListener("input", (e) => {
+    const val = parseFloat(e.target.value);
+    if (!isNaN(val) && val > 0) simulationParams.timeStep = val;
+  });
+
+  document.getElementById("input-num-steps")?.addEventListener("input", (e) => {
+    const val = parseInt(e.target.value, 10);
+    if (!isNaN(val) && val > 0) simulationParams.numSteps = val;
   });
 
   // Synchronisation des inputs HTML vers le modèle (flèche)

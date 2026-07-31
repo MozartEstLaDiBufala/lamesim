@@ -47,6 +47,11 @@ export const simulationState = {
   currentIndex: 0
 };
 
+export let simulationParams = {
+  timeStep: 0.001,
+  numSteps: 50
+};
+
 // Fonction pour écraser les données (utilisée par l'historique et l'import JSON)
 export function overwriteState(newBlade, newObstacle) {
   Object.assign(blade, newBlade);

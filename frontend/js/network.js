@@ -1,4 +1,4 @@
-import { blade, obstacle, appState, simulationState } from './state.js';
+import { blade, obstacle, appState, simulationState, simulationParams } from './state.js';
 import { isPointInRect } from './mathUtils.js';
 import { redraw } from './render.js';
 
@@ -13,6 +13,7 @@ export function updateTimelineUI() {
 }
 
 export async function runSimulation() {
+  
   if (!blade.isClosed || blade.mesh.elements.length === 0) return alert("Géométrie invalide.");
   if (!wsConnection || wsConnection.readyState !== WebSocket.OPEN) return alert("Serveur déconnecté.");
 
@@ -46,6 +47,10 @@ export async function runSimulation() {
 
   const payload = {
     scale_factor: 0.001, // 1 pixel = 0.001 mètre
+      parameters: {
+        time_step: simulationParams.timeStep,
+        num_steps: simulationParams.numSteps
+      },
       blade: {
         mesh: { 
           vertices: blade.mesh.vertices.map(v => ({ x: v.x, y: v.y, t: v.t !== undefined ? v.t : 1.0 })), 
@@ -67,6 +72,20 @@ export async function runSimulation() {
       }
     };
 
+  try {
+    // Validation visuelle du payload dans la console avant l'envoi
+    console.log("[Simulation] Préparation du payload :", payload);
+    
+    const jsonString = JSON.stringify(payload);
+    console.log(`[Simulation] Taille du payload : ${jsonString.length} octets`);
+    
+    wsConnection.send(jsonString);
+    console.log("[Simulation] Payload envoyé avec succès.");
+  } catch (e) {
+    console.error("[Simulation] Erreur lors de la sérialisation ou de l'envoi :", e);
+  }
+
+
   wsConnection.send(JSON.stringify(payload));
   appState.mode = "simulation";
   redraw();
@@ -80,15 +99,26 @@ export function connectSimulationStream() {
   wsConnection = new WebSocket("ws://localhost:8000/stream");
 
   wsConnection.onopen = () => {
+    console.log("[WebSocket] Connexion établie avec le serveur.");
     statusIndicator.textContent = "● Connecté";
     const btnSim = document.getElementById("btn-sim");
     if (btnSim) btnSim.disabled = false;
   };
 
   wsConnection.onclose = () => {
+    // Le code 1000 indique une fermeture normale. Tout le reste est une erreur.
+    if (event.code === 1000) {
+      console.log(`[WebSocket] Déconnexion propre. Code: ${event.code}`);
+    } else {
+      console.warn(`[WebSocket] Déconnexion anormale. Code: ${event.code}. Raison: ${event.reason || "Non spécifiée par le serveur"}`);
+    }
     statusIndicator.textContent = "● Déconnecté";
     const btnSim = document.getElementById("btn-sim");
     if (btnSim) btnSim.disabled = true;
+  };
+
+  wsConnection.onerror = (error) => {
+    console.error("[WebSocket] Erreur réseau détectée :", error);
   };
 
   wsConnection.onmessage = (event) => {
