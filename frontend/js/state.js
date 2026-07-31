@@ -28,7 +28,8 @@ export const obstacle = {
 export const appState = {
   mode: "draw_blade",
   currentMaterial: "steel",
-  showMeshLines: true,
+  showPointMeshLines: true,        // État pour le bouton existant
+  showMeasurements: false,  // Nouvel état pour les mesures
   draggedPoint: null,
   activeTarget: null,
   segmentStart: null,

@@ -75,7 +75,8 @@ export function initEvents() {
   // Boutons UI
   document.getElementById("btn-undo")?.addEventListener("click", undo);
   document.getElementById("btn-redo")?.addEventListener("click", redo);
-  document.getElementById("btn-toggle-mesh")?.addEventListener("click", () => { appState.showMeshLines = !appState.showMeshLines; redraw(); });
+  document.getElementById("btn-toggle-meshpoint")?.addEventListener("click", () => { appState.showPointMeshLines = !appState.showPointMeshLines; redraw(); });
+  document.getElementById("btn-toggle-measurements")?.addEventListener("click", () => {appState.showMeasurements = !appState.showMeasurements;redraw(); });
   document.getElementById("select-tool")?.addEventListener("change", (e) => { appState.mode = e.target.value; });
   document.getElementById("select-material")?.addEventListener("change", (e) => {
     // 1. Mise à jour du matériau actif
@@ -140,7 +141,7 @@ export function initEvents() {
       }
     }
   });
-  
+
   // Synchronisation de la vitesse d'impact
   document.getElementById("input-impact-speed")?.addEventListener("input", (e) => {
     if (blade.kinematics) {

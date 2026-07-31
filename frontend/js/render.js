@@ -164,9 +164,50 @@ function drawEntity(target) {
       ctx.stroke();
     }
   }
+  // 3.bis DESSIN DES MESURES (Si activé)
+  if (appState.showMeasurements && contourToDraw.length > 1 && appState.mode !== "simulation") {
+    ctx.font = "bold 11px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    for (let i = 0; i < contourToDraw.length; i++) {
+      // Si la forme n'est pas fermée, on ne relie pas le dernier point au premier
+      if (i === contourToDraw.length - 1 && !target.isClosed) break;
+
+      const p1 = contourToDraw[i];
+      const p2 = contourToDraw[(i + 1) % contourToDraw.length];
+
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+      
+      // Distance mathématique : Math.hypot calcule la norme du vecteur. 
+      // 1 pixel = 1 mm, donc on a directement des millimètres.
+      const distMm = Math.hypot(dx, dy); 
+      
+      // Positionnement au milieu du segment
+      const midX = p1.x + dx / 2;
+      const midY = p1.y + dy / 2;
+
+      // Décalage perpendiculaire pour ne pas écrire SUR la ligne (12 pixels de décalage)
+      const angle = Math.atan2(dy, dx);
+      const offsetX = Math.cos(angle - Math.PI / 2) * 12;
+      const offsetY = Math.sin(angle - Math.PI / 2) * 12;
+
+      const text = `${distMm.toFixed(1)} mm`;
+      
+      // Fond blanc semi-transparent pour garantir la lisibilité
+      const textWidth = ctx.measureText(text).width;
+      ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
+      ctx.fillRect(midX + offsetX - textWidth / 2 - 3, midY + offsetY - 7, textWidth + 6, 14);
+
+      // Texte en rouge foncé
+      ctx.fillStyle = "#b71c1c";
+      ctx.fillText(text, midX + offsetX, midY + offsetY);
+    }
+  }
 
   // 4. DESSIN DES POINTS NŒUDS (Toujours visibles en mode édition)
-  if (appState.mode !== "simulation" && contourToDraw.length > 0) {
+  if (appState.mode !== "simulation" && contourToDraw.length > 0 && appState.showPointMeshLines) {
     ctx.fillStyle = target.type === "blade" ? "blue" : "darkcyan";
     contourToDraw.forEach(p => {
       ctx.beginPath(); 
@@ -373,6 +414,30 @@ function drawGraphicalScale() {
 }
 
 export function redraw() {
+  //Recalcul du centre de gravité de la lame
+  if (blade.contour.length > 0 && blade.kinematics && blade.kinematics.velocity && appState.mode !== "simulation") {
+    const vel = blade.kinematics.velocity;
+    
+    // Sauvegarde du vecteur
+    const vx = vel.endX - vel.startX || 0;
+    const vy = vel.endY - vel.startY || 0;
+
+    // Calcul du barycentre
+    let sumX = 0, sumY = 0;
+    blade.contour.forEach(p => { 
+      sumX += p.x; 
+      sumY += p.y; 
+    });
+    const centerX = sumX / blade.contour.length;
+    const centerY = sumY / blade.contour.length;
+
+    // Réassignation des coordonnées
+    vel.startX = centerX;
+    vel.startY = centerY;
+    vel.endX = centerX + vx;
+    vel.endY = centerY + vy;
+  }
+
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   
   drawEntity(blade);
