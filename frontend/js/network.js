@@ -34,6 +34,8 @@ export async function runSimulation() {
     if (blade.fixations.some(rect => isPointInRect(v.x, v.y, rect))) fixedNodesIndices.push(index);
   }); 
 
+  blade.fixedNodes = fixedNodesIndices;
+
   // Extraction des indices des nœuds encastrés de l'obstacle
   const obstacleFixedNodesIndices = [];
   if (obstacle.mesh && obstacle.mesh.vertices && obstacle.fixations) {
@@ -43,6 +45,8 @@ export async function runSimulation() {
       }
     });
   }
+
+  obstacle.fixedNodes = obstacleFixedNodesIndices;
 
   // Extraction du vecteur de direction (dx, dy)
   let dirX = 0, dirY = 0;

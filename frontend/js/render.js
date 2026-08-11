@@ -227,23 +227,43 @@ function drawEntity(target) {
   }
 
   // 5. DESSIN DES FIXATIONS
-  if (target.fixations && target.fixations.length > 0) {
-    target.fixations.forEach(rect => {
-      ctx.fillStyle = "rgba(0, 255, 0, 0.2)"; 
-      ctx.strokeStyle = "rgba(0, 200, 0, 0.5)";
-      ctx.fillRect(rect.x, rect.y, rect.w, rect.h); 
-      ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
-    });
-    
-    ctx.fillStyle = "lime";
-    meshVertices.forEach(v => {
-      if (target.fixations.some(rect => isPointInRect(v.x, v.y, rect))) {
-        ctx.beginPath(); 
-        ctx.arc(v.x, v.y, 4, 0, Math.PI * 2); 
-        ctx.fill(); 
-        ctx.stroke();
-      }
-    });
+  if (appState.mode === "simulation") {
+    // --- MODE SIMULATION ---
+    // Les rectangles ne sont plus pertinents, on dessine uniquement les nœuds attachés
+    if (target.fixedNodes && target.fixedNodes.length > 0) {
+      ctx.fillStyle = "lime";
+      target.fixedNodes.forEach(index => {
+        // On récupère les coordonnées actualisées du nœud dans la trame courante
+        const v = meshVertices[index]; 
+        if (v) {
+          ctx.beginPath(); 
+          ctx.arc(v.x, v.y, 4, 0, Math.PI * 2); 
+          ctx.fill(); 
+          ctx.stroke();
+        }
+      });
+    }
+  } else {
+    // --- MODE ÉDITION / DESSIN ---
+    // Logique d'origine : on dessine les zones (rectangles) et on met en surbrillance les points inclus
+    if (target.fixations && target.fixations.length > 0) {
+      target.fixations.forEach(rect => {
+        ctx.fillStyle = "rgba(0, 255, 0, 0.2)"; 
+        ctx.strokeStyle = "rgba(0, 200, 0, 0.5)";
+        ctx.fillRect(rect.x, rect.y, rect.w, rect.h); 
+        ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+      });
+      
+      ctx.fillStyle = "lime";
+      meshVertices.forEach(v => {
+        if (target.fixations.some(rect => isPointInRect(v.x, v.y, rect))) {
+          ctx.beginPath(); 
+          ctx.arc(v.x, v.y, 4, 0, Math.PI * 2); 
+          ctx.fill(); 
+          ctx.stroke();
+        }
+      });
+    }
   }
 
   // 6. DESSIN DE LA CINÉMATIQUE (Flèche de vitesse intégrée ici)
