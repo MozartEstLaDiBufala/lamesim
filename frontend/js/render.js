@@ -76,12 +76,22 @@ function drawEntity(target) {
   let activeStresses = null;
 
   // 1. Données de simulation
-  if (appState.mode === "simulation" && simulationState && simulationState.buffer.length > 0) {
-    const frameData = simulationState.buffer[simulationState.currentIndex].data[target.type];
-    if (frameData && frameData.vertices && frameData.vertices.length > 0) {
-      contourToDraw = frameData.vertices;
-      meshVertices = frameData.vertices;
-      activeStresses = frameData.peak_stresses;
+  if (appState.mode === "simulation" && typeof simulationState !== 'undefined' && simulationState.buffer.length > 0) {
+    const currentFrame = simulationState.buffer[simulationState.currentIndex];
+    
+    // 1. Sélection dynamique des sommets selon l'objet en cours de dessin
+    let nodes = null;
+    if (target.type === "blade" && currentFrame.blade_nodes) {
+      nodes = currentFrame.blade_nodes;
+    } else if (target.type === "obstacle" && currentFrame.obstacle_nodes) {
+      nodes = currentFrame.obstacle_nodes;
+    }
+
+    // 2. Remplacement des coordonnées d'origine par les coordonnées simulées
+    if (nodes && nodes.length > 0) {
+      contourToDraw = nodes;
+      meshVertices = nodes;
+      activeStresses = currentFrame.stresses || null;
     }
   }
 

@@ -1,4 +1,5 @@
 cd C:\Users\1moza\Desktop\Projet\Simu_lame\lamesim
+cd C:\Users\Mozart\Desktop\PC\PROGRAMME\lamesim\lamesim
 .venv\Scripts\activate
 uv add fastapi "uvicorn[standard]" pydantic scipy
 uv run uvicorn backend.main:app --reload
@@ -6,43 +7,16 @@ uv run uvicorn backend.main:app --reload
 
 
 cd C:\Users\1moza\Desktop\Projet\Simu_lame\lamesim\frontend
+cd C:\Users\Mozart\Desktop\PC\PROGRAMME\lamesim\lamesim\frontend
 python -m http.server 8080
 http://localhost:8080
 
 Feuille de route : Simulateur Mécanique (BladeSim)
 
-Jalon 1 : Géométrie et Interface
-Objectif : Générer les données d'entrée.
-Actions : Tracé vectoriel de la lame et de l'obstacle, maillage automatique (triangulation de Delaunay via Earcut), et calcul des paramètres initiaux (masse, barycentre, vecteur cinématique).
+Phase 1 : Interface utilisateur et Modélisation Géométrique L'objectif de cette phase était de construire un environnement de pré-traitement (pre-processing) robuste dans le navigateur, capable de générer des données physiques valides pour un solveur d'éléments finis (FEA).Gestion du maillage et de la topologie :Création des entités blade (lame) et obstacle (bois).Attribution des paramètres d'épaisseur (t) et d'identifiants de matériaux (material) à chaque élément triangulaire.Calcul dynamique du barycentre pour ancrer le vecteur cinématique indépendamment des déformations. Calibration spatiale :Établissement du ratio de conversion strict (1 pixel = 1 mm).Implémentation d'une règle graphique statique et d'étiquettes de mesure dynamiques sur les segments.Conditions aux limites (Boundary Conditions) :Universalisation de l'outil de fixation pour imposer des conditions de Dirichlet (encastrements) tant sur la lame que sur l'obstacle. Paramétrage du solveur :Séparation de la direction du vecteur de vitesse et de sa magnitude (vitesse d'impact en m/s).Exposition des variables d'intégration temporelle : pas de temps (Delta t) et nombre d'étapes (N).
 
-Jalon 2 : Proof of Concept (PoC) de l'Architecture Client-Serveur
-Objectif : Valider le pipeline de données sans bloquer sur la physique complexe.
-Actions (JS) : Sérialisation des géométries (points, triangles, vitesse) en JSON et envoi via fetch().
-Actions (Python) : Création du point de terminaison HTTP (FastAPI). 
-Implémentation d'un solveur "factice" calculant une contrainte arbitraire via atténuation radiale : sigma = (F) / (d^2 + 1).
-Rendu (JS) : Réception du tableau de valeurs et génération d'une heatmap basique interpolant les couleurs des triangles selon leur contrainte.
+Phase 2 : Architecture d'échange et Serveur Temps Réel L'objectif était d'établir un canal de communication asynchrone capable de soutenir un flux de données (streaming) sans surcharger la mémoire du navigateur.Routage WebSocket :Implémentation d'une connexion persistante via FastAPI.Mise en place d'un système de gestion d'état (simulationState.buffer) pour empiler les trames calculées au fur et à mesure de leur réception.Validation des schémas (Pydantic) :Structuration stricte du payload JSON (Nœuds, Éléments, Cinématique, Conditions aux limites, Échelle).Création de valeurs de repli (fallbacks) côté client pour prévenir les déconnexions (Erreur 1006) dues à des données manquantes.Moteur de restitution temporelle :Liaison d'un curseur (slider) temporel au pointeur de lecture (currentIndex) pour naviguer dans l'historique de la simulation.Substitution dynamique des coordonnées originelles par les coordonnées calculées lors de la phase de rendu (verticesToDraw).
 
+Phase 3 : Solveur FEA et Mécanique de Contact Cette phase concerne le cœur mathématique du projet. Le code Python actuel simule une translation linéaire (mock). Il doit être remplacé par un véritable modèle de mécanique des milieux continus.Détection de collision spatiale :Implémenter un algorithme (ex: GJK, SAT ou grilles spatiales) pour identifier le moment exact où un nœud de la lame pénètre un élément de l'obstacle.Mécanique de contact (Contact Mechanics) :Définir la loi de contact (pénalité ou multiplicateurs de Lagrange) pour empêcher l'interpénétration des maillages et transférer l'énergie cinétique de la lame vers l'obstacle.Matrice de rigidité et d'inertie :Associer les identifiants de matériaux (steel, wood) à une base de données de constantes physiques (Module de Young $E$, Coefficient de Poisson $\nu$, Densité $\rho$).Assembler la matrice de rigidité globale (K) et la matrice de masse (M).Résolution temporelle (Intégration numérique) :Remplacer la boucle de translation arbitraire par un schéma d'intégration (ex: Newmark-$\beta$ ou dynamique explicite) calculant les déplacements réels en fonction des forces d'impact.
 
-Retour au PoC (Frontend) : Nous ajoutons un "Mode Fixation" au code JavaScript. L'utilisateur dessinera sa géométrie complète (la lame et le manche formant une seule pièce continue). Il utilisera ensuite ce nouveau mode pour colorier les nœuds du manche qui simulent la prise en main.
-
-Reprise du Jalon 3 (Backend) : Le frontend enverra cette topologie enrichie au serveur Python. Le solveur pourra alors calculer la déformation de la hache entière en appliquant la méthode de pénalité sur les nœuds sélectionnés.
-
-Évolution ultérieure : Une fois la physique des matrices creuses validée sur cette pièce monobloc, l'architecture sera suffisamment robuste pour introduire la séparation des matériaux (bois vs acier).
-
-
-Jalon 3 : Physique Linéaire (Élasticité)
-Objectif : Remplacer le PoC par un véritable modèle mécanique (Loi de Hooke).
-Actions (Python) : Conversion du JSON en matrices NumPy. 
-Assemblage de la matrice de rigidité globale. 
-Calcul des déplacements nodaux et des contraintes réelles (Von Mises) avant déformation permanente.
-
-Jalon 4 : Physique Non-Linéaire (Réalisme et Coupe)
-Objectif : Simuler la déformation plastique et la rupture de la matière.
-Actions (Python) : Intégration d'un solveur FEA externe (ex: CalculiX) via l'API pour gérer les grands déplacements et la séparation des mailles (Element Deletion ou XFEM) lors de l'impact entre la lame et la bûche.
-
-Jalon 5 : Finalisation et Rendu du Projet (Déploiement)
-Objectif : Consolider l'application pour une utilisation en production ou présentation.
-Optimisation des performances : Minification du code JavaScript, gestion asynchrone des temps de chargement pendant les calculs du solveur (ajout d'un indicateur de chargement UI).
-Raffinement de l'interface (UI/UX) : Standardisation des contrôles (panneau latéral), ajout de légendes pour la heatmap (échelle de valeurs en MPa), et gestion des erreurs (alertes si le maillage est invalide ou le serveur hors ligne).
-Documentation technique : Rédaction d'un fichier README.md exhaustif expliquant les hypothèses mathématiques utilisées, l'architecture API, et les instructions de déploiement.
-Déploiement : Hébergement du frontend (ex: GitHub Pages, Vercel) et du backend Python (ex: Render, Heroku) pour rendre le simulateur accessible publiquement.
+Phase 4 : Post-traitement et Analyse des Résultats (À réaliser)Une fois les calculs physiques exacts, l'interface devra restituer l'information de manière analytique.Calcul et transmission des contraintes :Calculer le tenseur des contraintes pour chaque élément (Critère de Von Mises).Ajouter ces valeurs dans le payload de chaque frame (clé peak_stresses).Cartographie colorimétrique (Heatmap) :Connecter la fonction getStressColor aux données reçues pour modifier la couleur des triangles de bleu (repos) à rouge (limite d'élasticité atteinte).Extraction de données quantitatives :Générer des graphiques (via une bibliothèque comme Chart.js ou directement sur le canevas) pour afficher des courbes d'évolution temporelle : Force de réaction à l'impact, énergie cinétique, ou déformation maximale.

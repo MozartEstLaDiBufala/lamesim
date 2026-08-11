@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.sparse import coo_matrix
+from solver import compute_cst_stiffness 
 
 def assemble_global_stiffness(vertices, triangles, E, nu, thicknesses):
     """

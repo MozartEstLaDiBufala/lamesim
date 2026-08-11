@@ -92,8 +92,12 @@ export function initEvents() {
     }
   });
   document.getElementById("btn-start-stream")?.addEventListener("click", connectSimulationStream);
-  document.getElementById("btn-sim")?.addEventListener("click", runSimulation);
-  
+
+  const btnSim = document.getElementById("btn-sim");
+  btnSim.addEventListener("click", () => {
+    runSimulation();
+  });
+
   document.getElementById("sim-slider")?.addEventListener("input", (e) => {
     simulationState.currentIndex = parseInt(e.target.value);
     updateTimelineUI();
@@ -224,6 +228,12 @@ export function initEvents() {
       const v = blade.kinematics.velocity;
       if (distance(mx, my, v.endX, v.endY) < 15) {
         appState.draggingVelocity = true;
+        blade.kinematics.velocity = {
+          startX: mx,
+          startY: my,
+          endX: v.endX,
+          endY: v.endY
+        };
         return; 
       }
     }
