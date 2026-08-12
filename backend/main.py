@@ -5,6 +5,10 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ValidationError
 from typing import Optional, List, Dict, Any
+import logging
+logger = logging.getLogger(__name__)
+
+from backend.collision import CollisionDetector
 
 app = FastAPI(title="BladeSim API - Streaming Edition")
 
@@ -123,7 +127,20 @@ async def simulation_stream(websocket: WebSocket):
             length = math.hypot(dir_x, dir_y)
             norm_x = (dir_x / length) if length > 0 else 0.0
             norm_y = (dir_y / length) if length > 0 else 1.0 
+
+            # --- PRÉPARATION DE LA DÉTECTION DE COLLISION ---
+            # 1. On récupère les éléments (triangles) spécifiques à l'obstacle
+            obstacle_elements = payload.obstacle.mesh.elements if payload.obstacle else []
             
+            # 2. On formate les sommets de l'obstacle en dictionnaires pour le CollisionDetector
+            initial_obstacle_nodes = [{"x": pt.x, "y": pt.y} for pt in obstacle_vertices]
+            
+            # 3. Instanciation du détecteur (uniquement si un obstacle existe)
+            if initial_obstacle_nodes and obstacle_elements:
+                detector = CollisionDetector(initial_obstacle_nodes, obstacle_elements)
+            else:
+                detector = None
+
             print(f"[Solveur] Calcul lancé. Vitesse d'impact: {impact_speed} m/s")
 
             # Extraction des paramètres temporels
@@ -159,7 +176,17 @@ async def simulation_stream(websocket: WebSocket):
                 # 3. Maintien des sommets de l'obstacle (Fixes pour l'instant)
                 for pt in obstacle_vertices:
                     current_obstacle_nodes.append({"x": pt.x, "y": pt.y, "t": getattr(pt, 't', 1.0)})
-                
+
+                # --- EXÉCUTION DE LA DÉTECTION ---
+                contacts = []
+                if detector:
+                    contacts = detector.detect_penetrations(current_blade_nodes)
+                    if contacts: # S'il y a au moins un point d'impact
+                        print(f"[Étape {frame_id}] Collision ! {len(contacts)} nœud(s) de la lame dans l'obstacle.")
+                        
+                        # C'est ici, à la prochaine étape, que nous appliquerons 
+                        # la force de contact pour repousser ces nœuds (Méthode de Pénalité)
+                        
                 # Le signal de fin est strictement lié au nombre d'étapes demandé
                 is_last_step = (frame_id == num_steps)
                 
