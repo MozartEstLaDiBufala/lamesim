@@ -7,8 +7,10 @@ from pydantic import BaseModel, ValidationError
 from typing import Optional, List, Dict, Any
 import logging
 logger = logging.getLogger(__name__)
+import numpy as np
 
 from backend.collision import CollisionDetector
+from backend.fea import SystemAssembler
 
 app = FastAPI(title="BladeSim API - Streaming Edition")
 
@@ -45,12 +47,17 @@ class Kinematics(BaseModel):
     velocity: Optional[Velocity] = None # pour recevoir "null" sans crasher
     impactSpeed: float = 15.0
 
+class BoundaryConditions(BaseModel):
+    fixed_nodes: list[int] = []
+
 class BladeModel(BaseModel):
     mesh: Mesh
     kinematics: Kinematics
+    boundary_conditions: Optional[BoundaryConditions] = None
 
 class ObstacleModel(BaseModel):
     mesh: Mesh
+    boundary_conditions: Optional[BoundaryConditions] = None
 
 class SimulationPayload(BaseModel):
     scale_factor: float = 0.001
@@ -108,19 +115,9 @@ async def simulation_stream(websocket: WebSocket):
                 print("[Attention] Aucune flèche reçue. Chute verticale par défaut.")
                 dir_x = 0.0
                 dir_y = 1.0 # Le vecteur pointe vers le bas
-                
-                # On invente un point d'impact par défaut pour éviter le crash plus bas
-                impact_x = 0.0
-                impact_y = 0.0
-                force_magnitude = impact_speed
             else:
                 dir_x = vel.endX - vel.startX
                 dir_y = vel.endY - vel.startY
-                
-                # On utilise les vraies coordonnées
-                impact_x = vel.endX
-                impact_y = vel.endY
-                force_magnitude = math.hypot(dir_x, dir_y)
             
             # Normalisation du vecteur pour le déplacement
             
@@ -151,108 +148,138 @@ async def simulation_stream(websocket: WebSocket):
                 time_step = 0.001
                 num_steps = 50
 
-            print(f"[Solveur] Simulation initiée. Étapes: {num_steps} | Δt: {time_step}s")
+            # --- ASSEMBLAGE DES MATRICES GLOBALES FEA ---
+            print("[Solveur] Assemblage des matrices FEA en cours...")
+            
+            # 1. Conversion des nœuds Pydantic en dictionnaires pour notre assembleur
+            initial_blade_nodes = [{"x": pt.x, "y": pt.y, "t": getattr(pt, 't', 1.0)} for pt in blade_vertices]
+            initial_obstacle_nodes = [{"x": pt.x, "y": pt.y, "t": getattr(pt, 't', 1.0)} for pt in obstacle_vertices]
+            
+            # 2. Construction de K et M pour la Lame
+            if initial_blade_nodes and elements:
+                K_blade, M_blade = SystemAssembler.assemble(initial_blade_nodes, elements)
+                print(f"[Solveur] Matrice Lame assemblée : {K_blade.shape}")
+            else:
+                K_blade, M_blade = None, None
+                
+            # 3. Construction de K et M pour l'Obstacle
+            if initial_obstacle_nodes and obstacle_elements:
+                K_obstacle, M_obstacle = SystemAssembler.assemble(initial_obstacle_nodes, obstacle_elements)
+                print(f"[Solveur] Matrice Obstacle assemblée : {K_obstacle.shape}")
+            else:
+                K_obstacle, M_obstacle = None, None
+                
+            # --- INITIALISATION DE LA CINÉMATIQUE (VECTEURS D'ÉTAT) ---
+            print("[Solveur] Initialisation des vecteurs cinématiques...")
+            
+            num_nodes = len(initial_blade_nodes)
+            u_blade = np.zeros(2 * num_nodes) # Déplacements
+            v_blade = np.zeros(2 * num_nodes) # Vitesses
+            a_blade = np.zeros(2 * num_nodes) # Accélérations
+            
+            # Application de la vitesse d'impact initiale sur l'ensemble de la lame
+            for i in range(num_nodes):
+                v_blade[2*i] = norm_x * impact_speed
+                v_blade[2*i + 1] = norm_y * impact_speed
+                
+            # Récupération des nœuds encastrés pour les conditions aux limites
+            fixed_blade_nodes = payload.blade.boundary_conditions.fixed_nodes if payload.blade.boundary_conditions else []
 
+            print(f"[Solveur] Simulation initiée. Étapes: {num_steps} | Δt: {time_step}s")
+            
             # C. Boucle de calcul temporel (Le streaming)
             for frame_id in range(num_steps+1):
-                current_blade_nodes = []
-                current_obstacle_nodes = []
-                
-                # 1. Calcul du déplacement physique réel
                 current_time = frame_id * time_step
                 
-                # Le multiplicateur (ex: * 100) permet d'exagérer visuellement le déplacement 
-                # à l'écran pour des temps d'intégration très courts (millisecondes).
-                displacement = current_time * impact_speed * 100 
+                # 1. Calcul des forces internes (Élasticité du matériau : F_int = K * u)
+                if K_blade is not None:
+                    F_int = K_blade.dot(u_blade)
+                else:
+                    F_int = np.zeros(2 * num_nodes)
                 
-                # 2. Application du vecteur sur chaque sommet de la lame
-                for pt in blade_vertices:
-                    new_x = pt.x + (norm_x * displacement)
-                    new_y = pt.y + (norm_y * displacement)
-                    # On conserve la propriété d'épaisseur 't'
-                    current_blade_nodes.append({"x": new_x, "y": new_y, "t": getattr(pt, 't', 1.0)})
+                # 2. Initialisation des forces externes
+                F_ext = np.zeros(2 * num_nodes)
                 
-                # 3. Maintien des sommets de l'obstacle (Fixes pour l'instant)
-                for pt in obstacle_vertices:
-                    current_obstacle_nodes.append({"x": pt.x, "y": pt.y, "t": getattr(pt, 't', 1.0)})
+                # 3. Projection des coordonnées actuelles pour la détection
+                current_blade_nodes = []
+                for i, pt in enumerate(initial_blade_nodes):
+                    current_blade_nodes.append({
+                        "x": pt["x"] + u_blade[2*i],
+                        "y": pt["y"] + u_blade[2*i + 1],
+                        "t": pt["t"]
+                    })
+                
+                # Maintien de l'obstacle fixe
+                current_obstacle_nodes = [{"x": pt.x, "y": pt.y, "t": getattr(pt, 't', 1.0)} for pt in obstacle_vertices]
 
-                # --- EXÉCUTION DE LA DÉTECTION ET MÉCANIQUE DE CONTACT ---
-                contacts = []
-                contact_forces = {} # Dictionnaire stockant les forces subies par chaque nœud de la lame
-                penalty_stiffness = 1e7 # Constante kp : Très élevée pour empêcher l'interpénétration
-                
+                # 4. Mécanique de contact (Génération de F_ext)
                 if detector:
                     contacts = detector.detect_penetrations(current_blade_nodes)
+                    penalty_stiffness = 1e11 # Constante de ressort de pénalité
                     
-                    if contacts:
-                        for idx_node, idx_el in contacts:
-                            node = current_blade_nodes[idx_node]
-                            el = detector.obstacle_elements[idx_el]
-                            p1 = detector.obstacle_nodes[el.nodes[0]]
-                            p2 = detector.obstacle_nodes[el.nodes[1]]
-                            p3 = detector.obstacle_nodes[el.nodes[2]]
+                    for idx_node, idx_el in contacts:
+                        node = current_blade_nodes[idx_node]
+                        el = detector.obstacle_elements[idx_el]
+                        p1 = detector.obstacle_nodes[el.nodes[0]]
+                        p2 = detector.obstacle_nodes[el.nodes[1]]
+                        p3 = detector.obstacle_nodes[el.nodes[2]]
 
-                            # 1. Calcul du chemin de sortie (géométrie)
-                            delta, nx, ny = detector.get_penetration_info(node, p1, p2, p3)
+                        # Pénétration mathématique
+                        delta, nx, ny = detector.get_penetration_info(node, p1, p2, p3)
 
-                            # 2. Loi de pénalité : Force = Raideur * Pénétration
-                            fx = penalty_stiffness * delta * nx
-                            fy = penalty_stiffness * delta * ny
-                            
-                            contact_forces[idx_node] = {"fx": fx, "fy": fy}
-                            
-                        print(f"[Étape {frame_id}] {len(contacts)} collisions -> Force maximale générée : {max([math.hypot(f['fx'], f['fy']) for f in contact_forces.values()]):.2f} N")
+                        # Ajout de la force de pénalité au vecteur de force globale
+                        F_ext[2*idx_node] += penalty_stiffness * delta * nx
+                        F_ext[2*idx_node + 1] += penalty_stiffness * delta * ny
 
-                # Le signal de fin est strictement lié au nombre d'étapes demandé
-                is_last_step = (frame_id == num_steps)
+                # 5. Calcul de l'accélération : a = (F_ext - F_int) / M
+                damping_factor = 5.0 # Absorbe les micro-vibrations parasites
+                if M_blade is not None:
+                    for i in range(2 * num_nodes):
+                        if M_blade[i] > 1e-12: # Protection contre la division par zéro
+                            # On freine très légèrement la vitesse pour stabiliser le maillage
+                            force_amortissement = damping_factor * v_blade[i] * M_blade[i]
+                            a_blade[i] = (F_ext[i] - F_int[i] - force_amortissement) / M_blade[i]
+                        else:
+                            a_blade[i] = 0.0
 
-                # --- CALCUL DES CONTRAINTES VISUELLES (HEAT MAP) ---
+                # 6. Intégration Explicite (Mise à jour Vitesse puis Déplacement)
+                v_blade += a_blade * time_step
+                
+                # 7. Application stricte des conditions aux limites (Les fixations ne bougent pas)
+                for idx in fixed_blade_nodes:
+                    v_blade[2*idx] = 0.0
+                    v_blade[2*idx + 1] = 0.0
+                    u_blade[2*idx] = 0.0
+                    u_blade[2*idx + 1] = 0.0
+
+                u_blade += v_blade * time_step
+
+                # 8. Calcul des contraintes réelles (Heat Map physique)
+                # La contrainte est désormais proportionnelle aux forces internes générées dans le matériau
                 stresses = []
-                # On détermine le point central de l'impact actuel
-                if contact_forces:
-                    cx_contact = sum(current_blade_nodes[idx]['x'] for idx in contact_forces.keys()) / len(contact_forces)
-                    cy_contact = sum(current_blade_nodes[idx]['y'] for idx in contact_forces.keys()) / len(contact_forces)
-                    # On lisse la force maximale pour l'affichage (divisée par 1e6 pour compenser la pénalité gigantesque)
-                    max_visual_force = max([math.hypot(f['fx'], f['fy']) for f in contact_forces.values()]) / 1e6
-                else:
-                    cx_contact, cy_contact, max_visual_force = 0, 0, 0
-
-                # On propage cette force sur les éléments de la lame (Triangles)
                 for el in elements:
-                    if max_visual_force > 0:
-                        p0 = current_blade_nodes[el.nodes[0]]
-                        p1 = current_blade_nodes[el.nodes[1]]
-                        p2 = current_blade_nodes[el.nodes[2]]
-                        
-                        # Centre de gravité du triangle
-                        cx = (p0['x'] + p1['x'] + p2['x']) / 3.0
-                        cy = (p0['y'] + p1['y'] + p2['y']) / 3.0
-                        
-                        # Plus le triangle est loin de la zone d'impact, moins il subit de contrainte
-                        distance = math.hypot(cx - cx_contact, cy - cy_contact)
-                        normalized_distance = distance / 15.0 
-                        
-                        sigma = max_visual_force / ((normalized_distance ** 2) + 1)
-                        stresses.append(sigma)
-                    else:
-                        stresses.append(0.0)
+                    n1, n2, n3 = el.nodes[0], el.nodes[1], el.nodes[2]
+                    # Moyenne des efforts de rappel sur les 3 sommets du triangle
+                    f_el = (abs(F_int[2*n1]) + abs(F_int[2*n1+1]) + 
+                            abs(F_int[2*n2]) + abs(F_int[2*n2+1]) + 
+                            abs(F_int[2*n3]) + abs(F_int[2*n3+1])) / 3.0
+                    stresses.append(float(f_el))
 
-                # 5. Construction STRICTE de la trame attendue par render.js
+                # 9. Construction et envoi du payload final
+                is_last_step = (frame_id == num_steps)
+                
                 frame_payload = {
                     "step": frame_id,
                     "time": current_time,
-                    "blade_displacement_cm": displacement, 
+                    "blade_displacement_cm": float(np.mean(u_blade[1::2])) * 100, # Moyenne du déplacement Y en cm
                     "blade_nodes": current_blade_nodes,
                     "obstacle_nodes": current_obstacle_nodes,
                     "stresses": stresses,
                     "is_finished": is_last_step 
                 }
                 
-                # 6. Envoi immédiat au navigateur
                 await websocket.send_text(json.dumps(frame_payload))
-                
-                # Légère pause pour cadencer l'animation côté client
-                await asyncio.sleep(0.05) 
+                await asyncio.sleep(0.05)
                 
             print("[Solveur] Simulation terminée. En attente d'une nouvelle requête...\n")
 
@@ -263,8 +290,3 @@ async def simulation_stream(websocket: WebSocket):
         print(f"Erreur inattendue du solveur : {e}")
 
 
-
-# # Affiche le modèle JSON attendu dans la console au lancement du serveur
-# print("\n--- STRUCTURE STRICTE ATTENDUE PAR LE SERVEUR ---")
-# print(SimulationPayload.schema_json(indent=2))
-# print("-------------------------------------------------\n")       
