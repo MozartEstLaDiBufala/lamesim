@@ -1,3 +1,6 @@
+import math
+
+
 class CollisionDetector:
     def __init__(self, obstacle_nodes, obstacle_elements):
         """
@@ -61,5 +64,41 @@ class CollisionDetector:
                         active_contacts.append((idx_node, idx_el))
                         # Un nœud ne peut pénétrer qu'un seul élément à la fois à un instant T
                         break 
-                        
+                    
         return active_contacts
+    
+    def get_penetration_info(self, pt, p1, p2, p3):
+        """
+        Trouve le bord du triangle le plus proche du point 'pt'.
+        Retourne la profondeur (delta) et le vecteur normal pour le repousser (nx, ny).
+        """
+        edges = [(p1, p2), (p2, p3), (p3, p1)]
+        min_depth = float('inf')
+        best_nx, best_ny = 0.0, 0.0
+
+        for a, b in edges:
+            ab_x, ab_y = b['x'] - a['x'], b['y'] - a['y']
+            ap_x, ap_y = pt['x'] - a['x'], pt['y'] - a['y']
+
+            l2 = ab_x**2 + ab_y**2
+            if l2 == 0: 
+                continue
+
+            # Projection mathématique sur le segment pour trouver le point de sortie le plus proche
+            t = max(0, min(1, (ap_x * ab_x + ap_y * ab_y) / l2))
+            proj_x = a['x'] + t * ab_x
+            proj_y = a['y'] + t * ab_y
+
+            # Vecteur de poussée (du point enfoncé vers la surface de l'obstacle)
+            push_x = proj_x - pt['x']
+            push_y = proj_y - pt['y']
+
+            depth = math.hypot(push_x, push_y)
+            if depth < min_depth:
+                min_depth = depth
+                if depth > 0:
+                    best_nx, best_ny = push_x / depth, push_y / depth
+                else:
+                    best_nx, best_ny = 0.0, 0.0
+
+        return min_depth, best_nx, best_ny

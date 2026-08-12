@@ -155,7 +155,6 @@ async def simulation_stream(websocket: WebSocket):
 
             # C. Boucle de calcul temporel (Le streaming)
             for frame_id in range(num_steps+1):
-                stresses = []
                 current_blade_nodes = []
                 current_obstacle_nodes = []
                 
@@ -177,19 +176,67 @@ async def simulation_stream(websocket: WebSocket):
                 for pt in obstacle_vertices:
                     current_obstacle_nodes.append({"x": pt.x, "y": pt.y, "t": getattr(pt, 't', 1.0)})
 
-                # --- EXÉCUTION DE LA DÉTECTION ---
+                # --- EXÉCUTION DE LA DÉTECTION ET MÉCANIQUE DE CONTACT ---
                 contacts = []
+                contact_forces = {} # Dictionnaire stockant les forces subies par chaque nœud de la lame
+                penalty_stiffness = 1e7 # Constante kp : Très élevée pour empêcher l'interpénétration
+                
                 if detector:
                     contacts = detector.detect_penetrations(current_blade_nodes)
-                    if contacts: # S'il y a au moins un point d'impact
-                        print(f"[Étape {frame_id}] Collision ! {len(contacts)} nœud(s) de la lame dans l'obstacle.")
-                        
-                        # C'est ici, à la prochaine étape, que nous appliquerons 
-                        # la force de contact pour repousser ces nœuds (Méthode de Pénalité)
-                        
+                    
+                    if contacts:
+                        for idx_node, idx_el in contacts:
+                            node = current_blade_nodes[idx_node]
+                            el = detector.obstacle_elements[idx_el]
+                            p1 = detector.obstacle_nodes[el.nodes[0]]
+                            p2 = detector.obstacle_nodes[el.nodes[1]]
+                            p3 = detector.obstacle_nodes[el.nodes[2]]
+
+                            # 1. Calcul du chemin de sortie (géométrie)
+                            delta, nx, ny = detector.get_penetration_info(node, p1, p2, p3)
+
+                            # 2. Loi de pénalité : Force = Raideur * Pénétration
+                            fx = penalty_stiffness * delta * nx
+                            fy = penalty_stiffness * delta * ny
+                            
+                            contact_forces[idx_node] = {"fx": fx, "fy": fy}
+                            
+                        print(f"[Étape {frame_id}] {len(contacts)} collisions -> Force maximale générée : {max([math.hypot(f['fx'], f['fy']) for f in contact_forces.values()]):.2f} N")
+
                 # Le signal de fin est strictement lié au nombre d'étapes demandé
                 is_last_step = (frame_id == num_steps)
-                
+
+                # --- CALCUL DES CONTRAINTES VISUELLES (HEAT MAP) ---
+                stresses = []
+                # On détermine le point central de l'impact actuel
+                if contact_forces:
+                    cx_contact = sum(current_blade_nodes[idx]['x'] for idx in contact_forces.keys()) / len(contact_forces)
+                    cy_contact = sum(current_blade_nodes[idx]['y'] for idx in contact_forces.keys()) / len(contact_forces)
+                    # On lisse la force maximale pour l'affichage (divisée par 1e6 pour compenser la pénalité gigantesque)
+                    max_visual_force = max([math.hypot(f['fx'], f['fy']) for f in contact_forces.values()]) / 1e6
+                else:
+                    cx_contact, cy_contact, max_visual_force = 0, 0, 0
+
+                # On propage cette force sur les éléments de la lame (Triangles)
+                for el in elements:
+                    if max_visual_force > 0:
+                        p0 = current_blade_nodes[el.nodes[0]]
+                        p1 = current_blade_nodes[el.nodes[1]]
+                        p2 = current_blade_nodes[el.nodes[2]]
+                        
+                        # Centre de gravité du triangle
+                        cx = (p0['x'] + p1['x'] + p2['x']) / 3.0
+                        cy = (p0['y'] + p1['y'] + p2['y']) / 3.0
+                        
+                        # Plus le triangle est loin de la zone d'impact, moins il subit de contrainte
+                        distance = math.hypot(cx - cx_contact, cy - cy_contact)
+                        normalized_distance = distance / 15.0 
+                        
+                        sigma = max_visual_force / ((normalized_distance ** 2) + 1)
+                        stresses.append(sigma)
+                    else:
+                        stresses.append(0.0)
+
                 # 5. Construction STRICTE de la trame attendue par render.js
                 frame_payload = {
                     "step": frame_id,
