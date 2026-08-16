@@ -5,8 +5,8 @@ export const canvas = document.getElementById("canvas");
 export const ctx = canvas.getContext("2d");
 
 function getStressColor(stress, maxStress, baseColor) {
-  if (!maxStress || stress <= 0 || (stress / maxStress) < 0.1) return baseColor;
-  const ratio = Math.min(1, Math.max(0, stress / maxStress));
+  if (!maxStress || stress <= 0 || (stress / maxStress) < 0.02) return baseColor;
+  const ratio = Math.sqrt(Math.min(1, Math.max(0, stress / maxStress)));
   return `hsla(${(1 - ratio) * 60}, 100%, 50%, 0.85)`;
 }
 
@@ -87,7 +87,6 @@ function drawEntity(target) {
     
     // 1. Sélection dynamique des sommets selon l'objet en cours de dessin
     let nodes = null;
-    let activeStresses = null;
 
     if (target.type === "blade" && currentFrame.blade_nodes) {
       nodes = currentFrame.blade_nodes;
@@ -101,7 +100,6 @@ function drawEntity(target) {
     if (nodes && nodes.length > 0) {
       contourToDraw = nodes;
       meshVertices = nodes;
-      activeStresses = currentFrame.stresses || null;
     }
   }
 

@@ -62,62 +62,103 @@ export function rebuildRegionsFromEdges(target) {
   target.internalEdges = validEdges;
 }
 
-// --- NOUVELLE FONCTION : Raffinement FEA par subdivision ---
-export function refineMesh(target, levels = 1) {
-  for (let lvl = 0; lvl < levels; lvl++) {
-    const oldElements = target.mesh.elements;
-    const newElements = [];
-    
-    // Le cache garantit que deux triangles adjacents partagent le même sommet médian.
-    // C'est strictement obligatoire pour la matrice de rigidité globale.
-    const edgeCache = {};
+// ---Maillage Adaptatif par Bisection (Algorithme de Rivara) ---
+export function refineMeshAdaptive(target, maxEdgeLength = 30) {
+  // maxEdgeLength définit la taille maximale tolérée pour une arête (en pixels)
+  let needsRefinement = true;
+  let iteration = 0;
 
-    const getMidpoint = (idxA, idxB) => {
-      const minIdx = Math.min(idxA, idxB);
-      const maxIdx = Math.max(idxA, idxB);
-      const key = `${minIdx}_${maxIdx}`;
+  // Sécurité limitant la profondeur de récursion pour éviter le blocage du navigateur
+  while (needsRefinement && iteration < 2000) { 
+    needsRefinement = false;
+    let longestEdge = null;
+    let maxDist = maxEdgeLength; 
 
-      if (edgeCache[key] !== undefined) {
-        return edgeCache[key];
+    // Dictionnaire pour stocker les arêtes partagées et éviter les nœuds pendants
+    const edges = {}; 
+
+    // 1. Analyse géométrique : Extraction de toutes les arêtes du maillage
+    for (let i = 0; i < target.mesh.elements.length; i++) {
+      const el = target.mesh.elements[i];
+      const n = el.nodes;
+      const triEdges = [
+        [n[0], n[1]], [n[1], n[2]], [n[2], n[0]]
+      ];
+
+      for (let e of triEdges) {
+        const minN = Math.min(e[0], e[1]);
+        const maxN = Math.max(e[0], e[1]);
+        const key = `${minN}_${maxN}`;
+
+        if (!edges[key]) {
+          const p1 = target.mesh.vertices[minN];
+          const p2 = target.mesh.vertices[maxN];
+          const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+
+          edges[key] = { n1: minN, n2: maxN, dist: dist, tris: [i] };
+
+          // Enregistrement de l'arête si elle devient la nouvelle candidate la plus longue
+          if (dist > maxDist) {
+            maxDist = dist;
+            longestEdge = key;
+            needsRefinement = true;
+          }
+        } else {
+          // L'arête existe déjà, on associe ce deuxième triangle pour garantir la coupe bilatérale
+          edges[key].tris.push(i); 
+        }
       }
+    }
 
-      const pA = target.mesh.vertices[idxA];
-      const pB = target.mesh.vertices[idxB];
-      
-      // Sécurisation des valeurs par défaut pour éviter les erreurs NaN
-      const tA = pA.t !== undefined ? parseFloat(pA.t) : 1.0;
-      const tB = pB.t !== undefined ? parseFloat(pB.t) : 1.0;
+    // Condition d'arrêt : Le maillage respecte le critère de taille
+    if (!needsRefinement || !longestEdge) break;
 
-      const midPoint = {
-        x: (pA.x + pB.x) / 2,
-        y: (pA.y + pB.y) / 2,
-        t: pA.t 
-      };
+    // 2. Coupe de l'arête et création du point d'interpolation
+    const edgeData = edges[longestEdge];
+    const p1 = target.mesh.vertices[edgeData.n1];
+    const p2 = target.mesh.vertices[edgeData.n2];
 
-      const newIdx = target.mesh.vertices.length;
-      target.mesh.vertices.push(midPoint);
-      edgeCache[key] = newIdx;
-      return newIdx;
+    const t1 = p1.t !== undefined ? parseFloat(p1.t) : 1.0;
+    const t2 = p2.t !== undefined ? parseFloat(p2.t) : 1.0;
+    
+    const midPoint = {
+      x: (p1.x + p2.x) / 2,
+      y: (p1.y + p2.y) / 2,
+      t: (t1 + t2) / 2
     };
 
-    for (let el of oldElements) {
-      const n0 = el.nodes[0];
-      const n1 = el.nodes[1];
-      const n2 = el.nodes[2];
+    const midIdx = target.mesh.vertices.length;
+    target.mesh.vertices.push(midPoint);
 
-      const m01 = getMidpoint(n0, n1);
-      const m12 = getMidpoint(n1, n2);
-      const m20 = getMidpoint(n2, n0);
+    // 3. Remplacement topologique des triangles affectés
+    // Tri décroissant obligatoire pour ne pas décaler les index lors du splice
+    const trisToReplace = edgeData.tris.sort((a, b) => b - a);
+    const newElements = [];
 
-      const mat = el.material;
+    for (let triIdx of trisToReplace) {
+      const el = target.mesh.elements[triIdx];
+      const n = el.nodes;
+      
+      // Identification du sommet opposé à l'arête coupée
+      let oppositeNode = -1;
+      for (let node of n) {
+        if (node !== edgeData.n1 && node !== edgeData.n2) {
+          oppositeNode = node;
+          break;
+        }
+      }
 
-      // Division d'un triangle parent en 4 triangles enfants
-      newElements.push({ nodes: [n0, m01, m20], material: mat });
-      newElements.push({ nodes: [n1, m12, m01], material: mat });
-      newElements.push({ nodes: [n2, m20, m12], material: mat });
-      newElements.push({ nodes: [m01, m12, m20], material: mat });
+      // Génération de 2 sous-triangles parfaits
+      newElements.push({ nodes: [edgeData.n1, midIdx, oppositeNode], material: el.material });
+      newElements.push({ nodes: [midIdx, edgeData.n2, oppositeNode], material: el.material });
+
+      // Destruction de l'ancien triangle
+      target.mesh.elements.splice(triIdx, 1);
     }
-    target.mesh.elements = newElements;
+
+    // Intégration des nouveaux éléments au maillage global
+    target.mesh.elements.push(...newElements);
+    iteration++;
   }
 }
 
@@ -149,10 +190,11 @@ export function generateMesh(target) {
     }
   });
 
-  // --- APPLICATION DU RAFFINEMENT ---
-  // Le paramètre "1" divise chaque triangle par 4. 
-  // Un paramètre "2" diviserait par 16 (attention à la charge de calcul du backend Python).
-  refineMesh(target, 1);
+  // --- APPLICATION DU RAFFINEMENT ADAPTATIF ---
+  // Le paramètre "30" indique que toute arête dépassant 30 pixels sera subdivisée.
+  // Vous pouvez abaisser cette valeur (ex: 20) pour densifier davantage le maillage, 
+  // en veillant à l'impact sur les performances du serveur Python.
+  refineMeshAdaptive(target, 25);
 
   const centroidData = calculateCentroid(target.contour);
   target.physics.centroid = { x: centroidData.x, y: centroidData.y };
