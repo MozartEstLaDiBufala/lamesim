@@ -77,7 +77,26 @@ export function initEvents() {
   document.getElementById("btn-redo")?.addEventListener("click", redo);
   document.getElementById("btn-toggle-meshpoint")?.addEventListener("click", () => { appState.showPointMeshLines = !appState.showPointMeshLines; redraw(); });
   document.getElementById("btn-toggle-measurements")?.addEventListener("click", () => {appState.showMeasurements = !appState.showMeasurements;redraw(); });
-  document.getElementById("select-tool")?.addEventListener("change", (e) => { appState.mode = e.target.value; });
+  
+  document.getElementById("select-tool")?.addEventListener("change", (e) => {
+    const selectedTool = e.target.value;
+    const materialSelect = document.getElementById("select-material");
+
+    // On met à jour l'état si l'application est en mode dessin
+    if (appState.mode === "draw_blade" || appState.mode === "draw_obstacle") {
+      appState.mode = selectedTool;
+    }
+
+    // Synchronisation automatique du matériau
+    if (selectedTool === "draw_blade") {
+      appState.currentMaterial = "steel";
+      if (materialSelect) materialSelect.value = "steel";
+    } else if (selectedTool === "draw_obstacle") {
+      appState.currentMaterial = "wood";
+      if (materialSelect) materialSelect.value = "wood";
+    }
+  });
+
   document.getElementById("select-material")?.addEventListener("change", (e) => {
     // 1. Mise à jour du matériau actif
     appState.currentMaterial = e.target.value;
@@ -195,13 +214,21 @@ export function initEvents() {
   });
 
   document.getElementById("btn-edit")?.addEventListener("click", () => {
-    // 1. On lit quel outil est actuellement sélectionné dans le menu déroulant
+    // On lit quel outil est actuellement sélectionné dans le menu déroulant
     const toolSelector = document.getElementById("select-tool");
     const fallbackTool = toolSelector ? toolSelector.value : "draw_blade";
 
-    // 2. On change le mode global de l'application
+    // On change le mode global de l'application
     appState.mode = fallbackTool;
 
+    //RÉINITIALISATION DU MAILLAGE (Le "Undo")
+    // On force la reconstruction du maillage léger à partir des contours d'origine
+    if (blade.isClosed) {
+      generateMesh(blade);
+    }
+    if (obstacle.isClosed) {
+      generateMesh(obstacle);
+    }
     // 3. On redessine le canevas
     redraw();
   });

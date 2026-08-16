@@ -1,6 +1,7 @@
 import { blade, obstacle, appState, simulationState, simulationParams } from './state.js';
 import { isPointInRect } from './mathUtils.js';
 import { redraw } from './render.js';
+import { refineMeshAdaptive } from './geometry.js';
 
 let wsConnection = null;
 
@@ -20,7 +21,19 @@ export function updateTimelineUI() {
 
 export async function runSimulation() {
   
-  if (!blade.isClosed || blade.mesh.elements.length === 0) return alert("Géométrie invalide.");
+  if (!blade.isClosed || blade.mesh.elements.length === 0) {
+    return alert("Lame invalide.")
+   } else {
+    refineMeshAdaptive(blade, 25);
+   };
+  if (!obstacle.isClosed || obstacle.mesh.elements.length === 0) {
+    return alert("Obstacle invalide.")
+   } else {
+    refineMeshAdaptive(obstacle, 25);
+   };
+  
+  redraw();
+  
   if (!wsConnection || wsConnection.readyState !== WebSocket.OPEN) return alert("Serveur déconnecté.");
 
   const btnSim = document.getElementById("btn-sim");

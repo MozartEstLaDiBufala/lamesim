@@ -182,19 +182,15 @@ export function generateMesh(target) {
     if (flatCoords.length < 6) return;
     
     const earcutIndices = earcut(flatCoords); 
+    const finalMaterial = target.type === "blade" ? "steel" : "wood";
+    // Détermination du matériau final à appliquer lors de la fermeture de la forme
     for (let i = 0; i < earcutIndices.length; i += 3) {
       target.mesh.elements.push({
         nodes: [regionIndices[earcutIndices[i]], regionIndices[earcutIndices[i+1]], regionIndices[earcutIndices[i+2]]],
-        material: "steel"
+        material: finalMaterial
       });
     }
   });
-
-  // --- APPLICATION DU RAFFINEMENT ADAPTATIF ---
-  // Le paramètre "30" indique que toute arête dépassant 30 pixels sera subdivisée.
-  // Vous pouvez abaisser cette valeur (ex: 20) pour densifier davantage le maillage, 
-  // en veillant à l'impact sur les performances du serveur Python.
-  refineMeshAdaptive(target, 25);
 
   const centroidData = calculateCentroid(target.contour);
   target.physics.centroid = { x: centroidData.x, y: centroidData.y };
