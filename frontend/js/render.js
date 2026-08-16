@@ -10,36 +10,42 @@ function getStressColor(stress, maxStress, baseColor) {
   return `hsla(${(1 - ratio) * 60}, 100%, 50%, 0.85)`;
 }
 
-// Nouvelle fonction de subdivision adaptative et d'ombrage transparent
+// Fonction de subdivision adaptative et d'ombrage transparent
 function drawThicknessOverlay(ctx, p1, p2, p3, minT, maxT, depth = 0) {
+  // 1. Conversion stricte en nombres dès l'entrée dans la fonction
+  const t1 = p1.t !== undefined ? parseFloat(p1.t) : 1.0;
+  const t2 = p2.t !== undefined ? parseFloat(p2.t) : 1.0;
+  const t3 = p3.t !== undefined ? parseFloat(p3.t) : 1.0;
+
   const d12 = Math.hypot(p2.x - p1.x, p2.y - p1.y);
   const d23 = Math.hypot(p3.x - p2.x, p3.y - p2.y);
   const d31 = Math.hypot(p1.x - p3.x, p1.y - p3.y);
   const maxEdge = Math.max(d12, d23, d31);
 
+  // 2. Condition de fin : Remplissage du micro-triangle
   if (maxEdge < 15 || depth > 7) {
-    const t_avg = (p1.t + p2.t + p3.t) / 3;
+    // Utilisation exclusive des variables numériques validées (t1, t2, t3)
+    const t_avg = (t1 + t2 + t3) / 3.0;
     const ratio = maxT === minT ? 0 : (t_avg - minT) / (maxT - minT);
     const alpha = ratio * 0.65;
-    const shadowColor = `rgba(15, 25, 45, ${alpha})`;
-
-    ctx.fillStyle = shadowColor;
-    ctx.strokeStyle = shadowColor;
-    ctx.lineWidth = 0.1;
-
+    
+    ctx.fillStyle = `rgba(15, 25, 45, ${alpha})`;
+    
     ctx.beginPath();
     ctx.moveTo(p1.x, p1.y);
     ctx.lineTo(p2.x, p2.y);
     ctx.lineTo(p3.x, p3.y);
     ctx.closePath();
     ctx.fill();
-    ctx.stroke();
+    
+    // Le retrait de ctx.stroke() supprime les lignes de suture internes
     return;
   }
 
-  const m12 = { x: (p1.x + p2.x)/2, y: (p1.y + p2.y)/2, t: (p1.t + p2.t)/2 };
-  const m23 = { x: (p2.x + p3.x)/2, y: (p2.y + p3.y)/2, t: (p2.t + p3.t)/2 };
-  const m31 = { x: (p3.x + p1.x)/2, y: (p3.y + p1.y)/2, t: (p3.t + p1.t)/2 };
+  // 3. Subdivisions utilisant les variables sécurisées
+  const m12 = { x: (p1.x + p2.x)/2, y: (p1.y + p2.y)/2, t: (t1 + t2)/2 };
+  const m23 = { x: (p2.x + p3.x)/2, y: (p2.y + p3.y)/2, t: (t2 + t3)/2 };
+  const m31 = { x: (p3.x + p1.x)/2, y: (p3.y + p1.y)/2, t: (t3 + t1)/2 };
 
   drawThicknessOverlay(ctx, p1, m12, m31, minT, maxT, depth + 1);
   drawThicknessOverlay(ctx, m12, p2, m23, minT, maxT, depth + 1);
@@ -81,10 +87,14 @@ function drawEntity(target) {
     
     // 1. Sélection dynamique des sommets selon l'objet en cours de dessin
     let nodes = null;
+    let activeStresses = null;
+
     if (target.type === "blade" && currentFrame.blade_nodes) {
       nodes = currentFrame.blade_nodes;
+      activeStresses = currentFrame.stresses || null;
     } else if (target.type === "obstacle" && currentFrame.obstacle_nodes) {
       nodes = currentFrame.obstacle_nodes;
+      activeStresses = currentFrame.obstacle_stresses || null;
     }
 
     // 2. Remplacement des coordonnées d'origine par les coordonnées simulées
@@ -101,7 +111,7 @@ function drawEntity(target) {
     
     let minT = Infinity, maxT = -Infinity;
     meshVertices.forEach(v => {
-      let t = v.t !== undefined ? v.t : 1.0;
+      let t = v.t !== undefined ? parseFloat(v.t) : 1.0; 
       if (t < minT) minT = t;
       if (t > maxT) maxT = t;
     });
@@ -157,10 +167,17 @@ function drawEntity(target) {
     ctx.strokeStyle = target.type === "blade" ? "#333" : "#004085";
     ctx.lineWidth = 2;
     ctx.beginPath();
+    
+    // CORRECTION : On s'arrête strictement à la taille du contour d'origine
+    const numBoundaryPoints = target.contour.length;
+    
     ctx.moveTo(contourToDraw[0].x, contourToDraw[0].y);
-    for (let i = 1; i < contourToDraw.length; i++) {
-      ctx.lineTo(contourToDraw[i].x, contourToDraw[i].y);
+    for (let i = 1; i < numBoundaryPoints; i++) {
+      if (contourToDraw[i]) {
+        ctx.lineTo(contourToDraw[i].x, contourToDraw[i].y);
+      }
     }
+    
     if (target.isClosed) ctx.closePath();
     ctx.stroke();
 
@@ -168,8 +185,10 @@ function drawEntity(target) {
       ctx.strokeStyle = target.type === "blade" ? "#666" : "#004085";
       ctx.beginPath();
       target.internalEdges.forEach(edge => {
-        ctx.moveTo(contourToDraw[edge.p1].x, contourToDraw[edge.p1].y);
-        ctx.lineTo(contourToDraw[edge.p2].x, contourToDraw[edge.p2].y);
+        if (contourToDraw[edge.p1] && contourToDraw[edge.p2]) {
+          ctx.moveTo(contourToDraw[edge.p1].x, contourToDraw[edge.p1].y);
+          ctx.lineTo(contourToDraw[edge.p2].x, contourToDraw[edge.p2].y);
+        }
       });
       ctx.stroke();
     }

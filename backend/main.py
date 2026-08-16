@@ -172,11 +172,18 @@ async def simulation_stream(websocket: WebSocket):
             # --- INITIALISATION DE LA CINÉMATIQUE (VECTEURS D'ÉTAT) ---
             print("[Solveur] Initialisation des vecteurs cinématiques...")
             
+            # --- INITIALISATION DE LA CINÉMATIQUE DE LA LAME ---
             num_nodes = len(initial_blade_nodes)
             u_blade = np.zeros(2 * num_nodes) # Déplacements
             v_blade = np.zeros(2 * num_nodes) # Vitesses
             a_blade = np.zeros(2 * num_nodes) # Accélérations
-            
+
+            # --- INITIALISATION DE LA CINÉMATIQUE DE L'OBSTACLE ---
+            num_obs_nodes = len(initial_obstacle_nodes)
+            u_obs = np.zeros(2 * num_obs_nodes) # Déplacements de l'obstacle
+            v_obs = np.zeros(2 * num_obs_nodes) # Vitesses de l'obstacle
+            a_obs = np.zeros(2 * num_obs_nodes) # Accélérations de l'obstacle
+
             # Application de la vitesse d'impact initiale sur l'ensemble de la lame
             for i in range(num_nodes):
                 v_blade[2*i] = norm_x * impact_speed
@@ -201,16 +208,15 @@ async def simulation_stream(websocket: WebSocket):
                 F_ext = np.zeros(2 * num_nodes)
                 
                 # 3. Projection des coordonnées actuelles pour la détection
-                current_blade_nodes = []
-                for i, pt in enumerate(initial_blade_nodes):
-                    current_blade_nodes.append({
-                        "x": pt["x"] + u_blade[2*i],
-                        "y": pt["y"] + u_blade[2*i + 1],
-                        "t": pt["t"]
-                    })
-                
-                # Maintien de l'obstacle fixe
-                current_obstacle_nodes = [{"x": pt.x, "y": pt.y, "t": getattr(pt, 't', 1.0)} for pt in obstacle_vertices]
+                current_blade_nodes = [
+                    {"x": float(pt["x"] + u_blade[2*i]), "y": float(pt["y"] + u_blade[2*i+1]), "t": float(pt["t"])} 
+                    for i, pt in enumerate(initial_blade_nodes)
+                ]
+
+                current_obstacle_nodes = [
+                    {"x": float(pt["x"] + u_obs[2*i]), "y": float(pt["y"] + u_obs[2*i+1]), "t": float(pt["t"])} 
+                    for i, pt in enumerate(initial_obstacle_nodes)
+                ]
 
                 # 4. Mécanique de contact (Génération de F_ext)
                 if detector:

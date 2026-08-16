@@ -147,7 +147,7 @@ export function initEvents() {
         target.contour[idx][coord] = val;
 
         // Si l'utilisateur modifie X ou Y, la géométrie change, il faut remailler
-        if ((coord === 'x' || coord === 'y') && target.isClosed) {
+        if ((coord === 'x' || coord === 'y' || coord === 't') && target.isClosed) {
           generateMesh(target);
         }
         
@@ -158,11 +158,19 @@ export function initEvents() {
   });
 
   // Synchronisation de la vitesse d'impact
-  document.getElementById("input-impact-speed")?.addEventListener("input", (e) => {
+  const speedInput = document.getElementById("input-impact-speed");
+  if (speedInput) {
+    // 1. Synchronisation initiale forcée (Capture de la valeur HTML au chargement)
     if (blade.kinematics) {
-      blade.kinematics.impactSpeed = parseFloat(e.target.value) || 0;
+      blade.kinematics.impactSpeed = parseFloat(speedInput.value) || 0;
     }
-  });
+    // 2. Maintien de la synchronisation lors des modifications futures
+    speedInput.addEventListener("input", (e) => {
+      if (blade.kinematics) {
+        blade.kinematics.impactSpeed = parseFloat(e.target.value) || 0;
+      }
+    });
+  }
 
   // --- Système de Sauvegarde (Export JSON) ---
   document.getElementById("btn-save")?.addEventListener("click", () => {
@@ -349,6 +357,9 @@ export function initEvents() {
       const closest = findClosestPoint(mx, my, 15);
       if (closest) {
         closest.point.t = appState.currentThickness;
+        if (closest.target.isClosed) {
+          generateMesh(closest.target);
+        }
         redraw();
       }
     }
