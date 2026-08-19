@@ -30,7 +30,7 @@
     </div>
 
     <!-- Le curseur temporel (désactivé tant qu'il n'y a pas de données) -->
-    <input type="range" id="sim-slider" min="0" max="0" value="0" step="1" style="flex-grow: 1; cursor: pointer;" disabled>
+    <input type="range" id="sim-slider" min="0" value="0" step="1" style="flex-grow: 1; cursor: pointer;" disabled>
     
     <div style="font-size: 14px; min-width: 80px; text-align: right;">
       <strong id="sim-displacement">0.00 étapes</strong>
@@ -103,13 +103,13 @@
         <h4 style="margin: 0 0 10px 0; color: #333; font-size: 14px;">Paramètres du Solveur</h4>
         
         <div style="margin-bottom: 8px;">
-          <label for="input-time-step" style="font-size: 13px; display: inline-block; width: 140px;">Pas de temps (s) :</label>
-          <input type="number" id="input-time-step" value="0.001" step="0.0001" min="0.00001" style="width: 80px;">
+          <label for="input-simulate-time" style="font-size: 13px; display: inline-block; width: 140px;">Durée réelle à simuler (s) :</label>
+          <input type="number" id="input-simulate-time" value="0.05" step="0.1" min="0.0" style="width: 80px;">
         </div>
         
         <div>
           <label for="input-num-steps" style="font-size: 13px; display: inline-block; width: 140px;">Nombre d'étapes :</label>
-          <input type="number" id="input-num-steps" value="50" step="10" min="10" style="width: 80px;">
+          <input type="number" id="input-num-steps" value="50" step="5" min="10" style="width: 80px;">
         </div>
       </div>
       

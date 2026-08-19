@@ -1,4 +1,4 @@
-import { blade, obstacle, appState, materialsDB, simulationState } from './state.js';
+import { blade, obstacle, ruler, appState, materialsDB, simulationState } from './state.js';
 import { isPointInRect } from './mathUtils.js';
 import { updateTargetMass } from './geometry.js'
 
@@ -461,6 +461,42 @@ function drawGraphicalScale() {
   }
 }
 
+export function drawRuler(ctx) {
+  if (!ruler.visible) return;
+
+  const { p1, p2, hoveredPart } = ruler;
+  
+  // Ligne principale
+  ctx.beginPath();
+  ctx.moveTo(p1.x, p1.y);
+  ctx.lineTo(p2.x, p2.y);
+  ctx.strokeStyle = hoveredPart === "line" ? "#ff5500" : "#ffaa00";
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  // Poignées de contrôle
+  const drawHandle = (p, isHover) => {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+    ctx.fillStyle = isHover ? "#ff5500" : "#ffaa00";
+    ctx.fill();
+    ctx.stroke();
+  };
+  drawHandle(p1, hoveredPart === "p1");
+  drawHandle(p2, hoveredPart === "p2");
+
+  // Affichage de la distance (Hypothèse : 1 px = 1 mm)
+  const distPx = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+  const distCm = (distPx / 10).toFixed(2);
+  const midX = (p1.x + p2.x) / 2;
+  const midY = (p1.y + p2.y) / 2;
+
+  ctx.fillStyle = "#222";
+  ctx.font = "bold 14px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText(`${distCm} cm`, midX, midY - 10);
+}
+
 export function redraw() {
   //console.log("redraw")
   updateTargetMass(blade);
@@ -506,4 +542,5 @@ export function redraw() {
   updateDataPanel();
   drawScaleRuler();
   drawGraphicalScale();
+  drawRuler(ctx)
 }

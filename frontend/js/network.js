@@ -12,7 +12,7 @@ export function updateTimelineUI() {
   const frame = simulationState.buffer[simulationState.currentIndex];
   const ui = document.getElementById("sim-displacement");
 
- if (ui && frame) {
+  if (ui && frame) {
     const totalSteps = typeof simulationParams !== 'undefined' ? simulationParams.numSteps : 50;
     ui.textContent = `Étape : ${frame.step} / ${totalSteps}`;
   }
@@ -68,12 +68,14 @@ export async function runSimulation() {
     dirY = blade.kinematics.velocity.endY - blade.kinematics.velocity.startY;
   }
 
-  
+  const simulateTimeInput = document.getElementById("input-simulate-time");
+const numStepsInput = document.getElementById("input-num-steps");
+
   const payload = {
     scale_factor: 0.001, // 1 pixel = 0.001 mètre
     parameters: {
-      time_step: simulationParams.timeStep,
-      num_steps: simulationParams.numSteps
+      simulate_time: simulateTimeInput ? parseFloat(simulateTimeInput.value) : 0.05,
+      num_steps: numStepsInput ? parseInt(numStepsInput.value) : 50
     },
     blade: {
       mesh: { 

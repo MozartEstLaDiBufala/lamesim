@@ -57,3 +57,15 @@ export function overwriteState(newBlade, newObstacle) {
   Object.assign(blade, newBlade);
   Object.assign(obstacle, newObstacle);
 }
+
+export const ruler = {
+  visible: true,
+  p1: { x: 100, y: 100 },
+  p2: { x: 300, y: 100 },
+  hoveredPart: null, // Peut être "p1", "p2", "line" ou null
+  isDragging: false,
+  dragOffsetX: 0,
+  dragOffsetY: 0,
+  lineDX: 0,
+  lineDY: 0
+};

@@ -1,4 +1,4 @@
-import { appState, blade, obstacle, historyManager, overwriteState, simulationState, simulationParams } from './state.js';
+import { appState, blade, obstacle, ruler, historyManager, overwriteState, simulationState, simulationParams } from './state.js';
 import { canvas, ctx, redraw } from './render.js';
 import { runSimulation, connectSimulationStream, updateTimelineUI } from './network.js';
 import { distance, isPointInTriangle, pointToSegmentDistance } from './mathUtils.js';
@@ -123,13 +123,13 @@ export function initEvents() {
   });
 
   // Synchronisation des paramètres temporels
-  document.getElementById("input-time-step")?.addEventListener("input", (e) => {
+  document.getElementById("input-simulate-time")?.addEventListener("input", (e) => {
     const val = parseFloat(e.target.value);
-    if (!isNaN(val) && val > 0) simulationParams.timeStep = val;
+    if (!isNaN(val) && val > 0) simulationParams.simulateTime = val;
   });
 
   document.getElementById("input-num-steps")?.addEventListener("input", (e) => {
-    const val = parseInt(e.target.value, 10);
+    const val = parseInt(e.target.value);
     if (!isNaN(val) && val > 0) simulationParams.numSteps = val;
   });
 
@@ -256,6 +256,17 @@ export function initEvents() {
     const rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
+
+    if (ruler.visible && ruler.hoveredPart) {
+      ruler.isDragging = true;
+      if (ruler.hoveredPart === "line") {
+        ruler.dragOffsetX = mx - ruler.p1.x;
+        ruler.dragOffsetY = my - ruler.p1.y;
+        ruler.lineDX = ruler.p2.x - ruler.p1.x;
+        ruler.lineDY = ruler.p2.y - ruler.p1.y;
+      }
+      return;
+    }
 
     if (appState.mode === "simulation") return;
 
@@ -397,6 +408,39 @@ export function initEvents() {
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
 
+    if (ruler.visible) {
+      if (ruler.isDragging) {
+        if (ruler.hoveredPart === "p1") {
+          ruler.p1.x = mx; ruler.p1.y = my;
+        } else if (ruler.hoveredPart === "p2") {
+          ruler.p2.x = mx; ruler.p2.y = my;
+        } else if (ruler.hoveredPart === "line") {
+          ruler.p1.x = mx - ruler.dragOffsetX;
+          ruler.p1.y = my - ruler.dragOffsetY;
+          ruler.p2.x = ruler.p1.x + ruler.lineDX;
+          ruler.p2.y = ruler.p1.y + ruler.lineDY;
+        }
+        redraw();
+        return; // Stoppe l'exécution : on bloque les outils de dessin en arrière-plan
+      } else {
+        // Détection du survol
+        const distP1 = distance(mx, my, ruler.p1.x, ruler.p1.y);
+        const distP2 = distance(mx, my, ruler.p2.x, ruler.p2.y);
+        const distLine = pointToSegmentDistance(mx, my, ruler.p1.x, ruler.p1.y, ruler.p2.x, ruler.p2.y);
+
+        if (distP1 < 10) ruler.hoveredPart = "p1";
+        else if (distP2 < 10) ruler.hoveredPart = "p2";
+        else if (distLine < 8) ruler.hoveredPart = "line";
+        else ruler.hoveredPart = null;
+
+        if (ruler.hoveredPart) {
+          canvas.style.cursor = ruler.hoveredPart === "line" ? "move" : "pointer";
+          redraw();
+          return; 
+        }
+      }
+    }
+
     if (appState.draggingVelocity && blade.kinematics.velocity) {
       blade.kinematics.velocity.endX = mx;
       blade.kinematics.velocity.endY = my;
@@ -433,6 +477,11 @@ export function initEvents() {
     const rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
+
+    if (ruler.isDragging) {
+      ruler.isDragging = false;
+      return;
+    }
 
     if (appState.mode === "fixation" && appState.fixationStart) {
       // Normalisation du rectangle (permet de tracer de bas en haut ou droite à gauche)
