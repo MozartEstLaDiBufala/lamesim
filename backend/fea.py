@@ -66,55 +66,53 @@ class ElementCST:
 
 class SystemAssembler:
     @staticmethod
-    def assemble(nodes_dict_list, elements):
+    def assemble(nodes_dict_list, elements, scale_factor=0.001):
         """
         Assemble la matrice de rigidité globale K et le vecteur de masse globale M.
-        nodes_dict_list : Liste de dictionnaires [{'x': float, 'y': float, 't': float}]
-        elements : Liste d'objets (Pydantic ou dictionnaires) contenant 'nodes' et 'material'
+        L'intégration du scale_factor (0.001 par défaut) convertit les pixels en mètres.
         """
         num_nodes = len(nodes_dict_list)
-        
-        # K_global : Matrice creuse (2N x 2N) pour économiser la mémoire
         K_global = lil_matrix((2 * num_nodes, 2 * num_nodes))
-        
-        # M_global : Vecteur de masse concentrée (2N)
         M_global = np.zeros(2 * num_nodes) 
 
         for el in elements:
-            # Extraction des indices et des nœuds
             n1, n2, n3 = el.nodes[0], el.nodes[1], el.nodes[2]
             p1, p2, p3 = nodes_dict_list[n1], nodes_dict_list[n2], nodes_dict_list[n3]
             
-            # Épaisseur et Matériau
             t = p1.get('t', 1.0)
             mat_name = getattr(el, 'material', 'steel')
             
-            # Calcul de Ke local (6x6)
-            Ke, Area = ElementCST.compute_stiffness_matrix(p1, p2, p3, t, mat_name)
-            if Area < 1e-10:
+            # Calcul de Ke local avec les dimensions brutes (en pixels)
+            Ke, Area_px = ElementCST.compute_stiffness_matrix(p1, p2, p3, t, mat_name)
+            if Area_px < 1e-10:
                 continue
                 
-            # Calcul de la masse du triangle (Aire * Épaisseur * Densité)
-            rho = MATERIALS.get(mat_name, MATERIALS["steel"])["rho"]
-            m_total = Area * t * rho
-            m_node = m_total / 3.0 # Répartition équitable sur les 3 sommets
+            # --- CORRECTION PHYSIQUE DES UNITÉS ---
+            # 1. Conversion de la matrice de rigidité : 
+            # Mathématiquement, K dépend linéairement de l'échelle spatiale.
+            Ke_corrected = Ke * scale_factor
+
+            # 2. Conversion de la géométrie en mètres pour la masse
+            area_m2 = Area_px * (scale_factor ** 2)
+            t_m = t * scale_factor
             
-            # Définition des 6 Degrés de Liberté globaux pour ce triangle
-            # Le nœud i occupe les indices 2*i (pour X) et 2*i+1 (pour Y)
+            # Calcul de la masse réelle du triangle (en kg)
+            rho = MATERIALS.get(mat_name, MATERIALS["steel"])["rho"]
+            m_total = area_m2 * t_m * rho
+            m_node = m_total / 3.0 
+            
             ddls = [
                 2*n1, 2*n1+1,
                 2*n2, 2*n2+1,
                 2*n3, 2*n3+1
             ]
             
-            # Assemblage de K : On ajoute Ke aux bons emplacements dans K_global
+            # Assemblage avec les valeurs physiquement correctes
             for i in range(6):
                 for j in range(6):
-                    K_global[ddls[i], ddls[j]] += Ke[i, j]
+                    K_global[ddls[i], ddls[j]] += Ke_corrected[i, j]
             
-            # Assemblage de M : On ajoute la masse modale aux DDLs X et Y
             for i in range(6):
                 M_global[ddls[i]] += m_node
                 
-        # On convertit en format CSR (Compressed Sparse Row) pour des calculs ultra-rapides plus tard
         return K_global.tocsr(), M_global

@@ -196,6 +196,8 @@ export function generateMesh(target) {
   target.physics.centroid = { x: centroidData.x, y: centroidData.y };
   target.physics.area = centroidData.area;
 
+  updateTargetMass(target);
+
   if (target.type === "blade" && !target.kinematics.velocity) {
     target.kinematics.velocity = { startX: centroidData.x, startY: centroidData.y, endX: centroidData.x, endY: centroidData.y + 100 };
     const vxInput = document.getElementById("input-vx");
@@ -203,5 +205,73 @@ export function generateMesh(target) {
     if (vxInput) vxInput.value = 0;
     if (vyInput) vyInput.value = 100;
   }
+  
   redraw();
+}
+
+export function updateTargetMass(target) {
+  //console.log("updatetargetmass")
+
+  // Vérification de la présence d'un maillage valide
+  if (!target.mesh || !target.mesh.elements || target.mesh.elements.length === 0) {
+    if (target.physics) target.physics.mass = 0;
+    return;
+  }
+
+  const scaleFactor = 0.001; // Facteur d'échelle spatiale (1 px = 1 mm)
+  let totalMass = 0;
+
+  // Itération sur chaque élément fini (triangle)
+  for (let i = 0; i < target.mesh.elements.length; i++) {
+    const el = target.mesh.elements[i];
+    const n = el.nodes;
+
+    // Sécurité topologique
+    if (n.length < 3 || !target.mesh.vertices[n[0]] || !target.mesh.vertices[n[1]] || !target.mesh.vertices[n[2]]) {
+      continue;
+    }
+
+    const p1 = target.mesh.vertices[n[0]];
+    const p2 = target.mesh.vertices[n[1]];
+    const p3 = target.mesh.vertices[n[2]];
+
+    // 1. Calcul de l'aire du sous-triangle (Théorème du lacet)
+    const area_px = 0.5 * Math.abs(
+      p1.x * (p2.y - p3.y) +
+      p2.x * (p3.y - p1.y) +
+      p3.x * (p1.y - p2.y)
+    );
+
+    // 2. Conversion spatiale (pixels carrés vers mètres carrés)
+    const area_m2 = area_px * Math.pow(scaleFactor, 2);
+
+    // 3. Interpolation de l'épaisseur moyenne du triangle (en mètres)
+    const t1 = p1.t !== undefined ? parseFloat(p1.t) : 1.0;
+    const t2 = p2.t !== undefined ? parseFloat(p2.t) : 1.0;
+    const t3 = p3.t !== undefined ? parseFloat(p3.t) : 1.0;
+    const avg_t_px = (t1 + t2 + t3) / 3.0;
+    const t_m = avg_t_px * scaleFactor;
+
+    // 4. Lecture stricte du matériau affecté à l'élément
+    const matName = el.material || (target.type === "blade" ? "steel" : "wood");
+    const density = matName === "steel" ? 7850 : 600;
+
+    // 5. Intégration de la masse élémentaire
+    totalMass += density * area_m2 * t_m;
+  }
+
+  target.physics.mass = totalMass;
+
+  // Synchronisation de l'interface utilisateur
+  if (target.type === "blade") {
+    const massInput = document.getElementById("input-mass-blade");
+    if (massInput) {
+      massInput.value = totalMass.toFixed(2);
+    }
+  } else {
+    const massInput = document.getElementById("input-mass-obstacle");
+    if (massInput) {
+      massInput.value = totalMass.toFixed(2);
+    }
+  }
 }

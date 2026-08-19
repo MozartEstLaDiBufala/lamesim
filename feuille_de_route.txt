@@ -41,3 +41,8 @@ et transmission des contraintes :Calculer le tenseur des contraintes pour chaque
 (clé peak_stresses).Cartographie colorimétrique (Heatmap) :Connecter la fonction getStressColor aux données reçues pour modifier la couleur des triangles de bleu (repos) 
 à rouge (limite d'élasticité atteinte).Extraction de données quantitatives :Générer des graphiques (via une bibliothèque comme Chart.js ou directement sur le canevas) pour 
 afficher des courbes d'évolution temporelle : Force de réaction à l'impact, énergie cinétique, ou déformation maximale.
+
+
+Lâcher passif (Gravité simple) : 3 m/s à 5 m/s.
+Coup standard (Bûcheronnage régulier) : 10 m/s à 14 m/s.
+Coup de force maximale (Élan complet) : 18 m/s à 22 m/s.

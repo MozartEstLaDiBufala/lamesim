@@ -1,5 +1,6 @@
 import { blade, obstacle, appState, materialsDB, simulationState } from './state.js';
 import { isPointInRect } from './mathUtils.js';
+import { updateTargetMass } from './geometry.js'
 
 export const canvas = document.getElementById("canvas");
 export const ctx = canvas.getContext("2d");
@@ -161,7 +162,7 @@ function drawEntity(target) {
   }
 
   // 3. DESSIN DES CONTOURS (Par-dessus le maillage)
-  if (contourToDraw.length > 0) {
+  if (appState.mode !== "simulation" && contourToDraw.length > 0) {
     ctx.strokeStyle = target.type === "blade" ? "#333" : "#004085";
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -461,6 +462,10 @@ function drawGraphicalScale() {
 }
 
 export function redraw() {
+  //console.log("redraw")
+  updateTargetMass(blade);
+  updateTargetMass(obstacle);
+  
   //Recalcul du centre de gravité de la lame
   if (blade.contour.length > 0 && blade.kinematics && blade.kinematics.velocity && appState.mode !== "simulation") {
     const vel = blade.kinematics.velocity;

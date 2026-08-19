@@ -142,10 +142,10 @@ async def simulation_stream(websocket: WebSocket):
 
             # Extraction des paramètres temporels
             if payload.parameters:
-                time_step = payload.parameters.get("time_step", 0.001)
+                time_step = payload.parameters.get("time_step", 0.00005)
                 num_steps = payload.parameters.get("num_steps", 50)
             else:
-                time_step = 0.001
+                time_step = 0.00005
                 num_steps = 50
 
             # --- ASSEMBLAGE DES MATRICES GLOBALES FEA ---
@@ -154,17 +154,18 @@ async def simulation_stream(websocket: WebSocket):
             # 1. Conversion des nœuds Pydantic en dictionnaires pour notre assembleur
             initial_blade_nodes = [{"x": pt.x, "y": pt.y, "t": getattr(pt, 't', 1.0)} for pt in blade_vertices]
             initial_obstacle_nodes = [{"x": pt.x, "y": pt.y, "t": getattr(pt, 't', 1.0)} for pt in obstacle_vertices]
+            scale_factor = payload.scale_factor # On récupère l'échelle du JSON
             
             # 2. Construction de K et M pour la Lame
             if initial_blade_nodes and elements:
-                K_blade, M_blade = SystemAssembler.assemble(initial_blade_nodes, elements)
+                K_blade, M_blade = SystemAssembler.assemble(initial_blade_nodes, elements, scale_factor)
                 print(f"[Solveur] Matrice Lame assemblée : {K_blade.shape}")
             else:
                 K_blade, M_blade = None, None
                 
             # 3. Construction de K et M pour l'Obstacle
             if initial_obstacle_nodes and obstacle_elements:
-                K_obstacle, M_obstacle = SystemAssembler.assemble(initial_obstacle_nodes, obstacle_elements)
+                K_obstacle, M_obstacle = SystemAssembler.assemble(initial_obstacle_nodes, obstacle_elements, scale_factor)
                 print(f"[Solveur] Matrice Obstacle assemblée : {K_obstacle.shape}")
             else:
                 K_obstacle, M_obstacle = None, None
@@ -191,74 +192,100 @@ async def simulation_stream(websocket: WebSocket):
                 
             # Récupération des nœuds encastrés pour les conditions aux limites
             fixed_blade_nodes = payload.blade.boundary_conditions.fixed_nodes if payload.blade.boundary_conditions else []
+            fixed_obs_nodes = payload.obstacle.boundary_conditions.fixed_nodes if payload.obstacle.boundary_conditions else []
 
-            print(f"[Solveur] Simulation initiée. Étapes: {num_steps} | Δt: {time_step}s")
+            sub_steps = 20
             
+            print(f"[Solveur] Simulation initiée. Étapes: {num_steps} | Δt: {time_step}s")
+
+            # --- INITIALISATION DU FICHIER DE DIAGNOSTIC ---
+            log_filename = "diagnostic_physique.csv"
+            with open(log_filename, "w") as f:
+                f.write("step,time,max_u_blade,max_F_ext_blade,max_F_int_blade,max_stress,max_u_obs\n")
+
             # C. Boucle de calcul temporel (Le streaming)
-            for frame_id in range(num_steps+1):
-                current_time = frame_id * time_step
+            for frame_id in range(num_steps + 1):
                 
-                # 1. Calcul des forces internes (Élasticité du matériau : F_int = K * u)
-                if K_blade is not None:
-                    F_int = K_blade.dot(u_blade)
-                else:
-                    F_int = np.zeros(2 * num_nodes)
-                
-                # 2. Initialisation des forces externes
-                F_ext = np.zeros(2 * num_nodes)
-                
-                # 3. Projection des coordonnées actuelles pour la détection
-                current_blade_nodes = [
-                    {"x": float(pt["x"] + u_blade[2*i]), "y": float(pt["y"] + u_blade[2*i+1]), "t": float(pt["t"])} 
-                    for i, pt in enumerate(initial_blade_nodes)
-                ]
+                # --- BOUCLE DE SOUS-INTÉGRATION PHYSIQUE ---
+                # On calcule 'sub_steps' fois la physique avant d'afficher 1 image
+                for _ in range(sub_steps):
 
-                current_obstacle_nodes = [
-                    {"x": float(pt["x"] + u_obs[2*i]), "y": float(pt["y"] + u_obs[2*i+1]), "t": float(pt["t"])} 
-                    for i, pt in enumerate(initial_obstacle_nodes)
-                ]
-
-                # 4. Mécanique de contact (Génération de F_ext)
-                if detector:
-                    contacts = detector.detect_penetrations(current_blade_nodes)
-                    penalty_stiffness = 1e11 # Constante de ressort de pénalité
                     
-                    for idx_node, idx_el in contacts:
-                        node = current_blade_nodes[idx_node]
-                        el = detector.obstacle_elements[idx_el]
-                        p1 = detector.obstacle_nodes[el.nodes[0]]
-                        p2 = detector.obstacle_nodes[el.nodes[1]]
-                        p3 = detector.obstacle_nodes[el.nodes[2]]
+                    # 1. Calcul des forces internes
+                    F_int = K_blade.dot(u_blade) if K_blade is not None else np.zeros(2 * num_nodes)
+                    F_int_obs = K_obstacle.dot(u_obs) if K_obstacle is not None else np.zeros(2 * num_obs_nodes)
+                    
+                    F_ext = np.zeros(2 * num_nodes)
+                    F_ext_obs = np.zeros(2 * num_obs_nodes)
 
-                        # Pénétration mathématique
-                        delta, nx, ny = detector.get_penetration_info(node, p1, p2, p3)
+                    # 2. Projection pour la détection
+                    current_blade_nodes = [{"x": float(pt["x"] + u_blade[2*i]), "y": float(pt["y"] + u_blade[2*i+1])} for i, pt in enumerate(initial_blade_nodes)]
+                    current_obstacle_nodes = [{"x": float(pt["x"] + u_obs[2*i]), "y": float(pt["y"] + u_obs[2*i+1])} for i, pt in enumerate(initial_obstacle_nodes)]
 
-                        # Ajout de la force de pénalité au vecteur de force globale
-                        F_ext[2*idx_node] += penalty_stiffness * delta * nx
-                        F_ext[2*idx_node + 1] += penalty_stiffness * delta * ny
+                    # 3. Mécanique de contact
+                    if detector:
+                        contacts = detector.detect_penetrations(current_blade_nodes)
+                        penalty_stiffness = 5e7  # Gardez cette valeur adoucie
+                        
+                        for idx_node, idx_el in contacts:
+                            node = current_blade_nodes[idx_node]
+                            el = detector.obstacle_elements[idx_el]
+                            n1, n2, n3 = el.nodes[0], el.nodes[1], el.nodes[2]
+                            p1, p2, p3 = detector.obstacle_nodes[n1], detector.obstacle_nodes[n2], detector.obstacle_nodes[n3]
 
-                # 5. Calcul de l'accélération : a = (F_ext - F_int) / M
-                damping_factor = 5.0 # Absorbe les micro-vibrations parasites
-                if M_blade is not None:
-                    for i in range(2 * num_nodes):
-                        if M_blade[i] > 1e-12: # Protection contre la division par zéro
-                            # On freine très légèrement la vitesse pour stabiliser le maillage
-                            force_amortissement = damping_factor * v_blade[i] * M_blade[i]
-                            a_blade[i] = (F_ext[i] - F_int[i] - force_amortissement) / M_blade[i]
-                        else:
-                            a_blade[i] = 0.0
+                            delta, nx, ny = detector.get_penetration_info(node, p1, p2, p3)
+                            
+                            force_x = penalty_stiffness * delta * nx
+                            force_y = penalty_stiffness * delta * ny
 
-                # 6. Intégration Explicite (Mise à jour Vitesse puis Déplacement)
-                v_blade += a_blade * time_step
-                
+                            F_ext[2*idx_node] += force_x
+                            F_ext[2*idx_node + 1] += force_y
+                            
+                            F_ext_obs[2*n1] -= force_x / 3.0
+                            F_ext_obs[2*n1+1] -= force_y / 3.0
+                            F_ext_obs[2*n2] -= force_x / 3.0
+                            F_ext_obs[2*n2+1] -= force_y / 3.0
+                            F_ext_obs[2*n3] -= force_x / 3.0
+                            F_ext_obs[2*n3+1] -= force_y / 3.0
+
+                    # 4. Accélérations avec Mass Scaling et Amortissement lourd
+                    damping_factor = 2.0  # Augmenté pour tuer les résonances internes
+                    
+                    if M_blade is not None:
+                        for i in range(2 * num_nodes):
+                            m_eff = max(M_blade[i], 0.001)
+                            a_blade[i] = (F_ext[i] - F_int[i] - damping_factor * v_blade[i] * m_eff) / m_eff
+                    
+                    if M_obstacle is not None:
+                        for i in range(2 * num_obs_nodes):
+                            m_eff_o = max(M_obstacle[i], 0.001)
+                            a_obs[i] = (F_ext_obs[i] - F_int_obs[i] - damping_factor * v_obs[i] * m_eff_o) / m_eff_o
+
+                    # 5. Intégration (Vitesses puis Déplacements)
+                    v_blade += a_blade * time_step
+                    v_obs += a_obs * time_step
+                    
+                    # 6. Verrouillage des conditions aux limites
+                    for idx in fixed_blade_nodes:
+                        v_blade[2*idx] = 0.0 ; v_blade[2*idx + 1] = 0.0
+                    for idx in fixed_obs_nodes:
+                        v_obs[2*idx] = 0.0 ; v_obs[2*idx + 1] = 0.0
+
+                    u_blade += v_blade * time_step
+                    u_obs += v_obs * time_step
+
                 # 7. Application stricte des conditions aux limites (Les fixations ne bougent pas)
                 for idx in fixed_blade_nodes:
-                    v_blade[2*idx] = 0.0
-                    v_blade[2*idx + 1] = 0.0
-                    u_blade[2*idx] = 0.0
-                    u_blade[2*idx + 1] = 0.0
+                    v_blade[2*idx] = 0.0 ; v_blade[2*idx + 1] = 0.0
+                
+                for idx in fixed_obs_nodes:
+                    v_obs[2*idx] = 0.0 ; v_obs[2*idx + 1] = 0.0
 
                 u_blade += v_blade * time_step
+                u_obs += v_obs * time_step
+
+                # Calcul du temps physique total écoulé à cette frame
+                current_time = frame_id * sub_steps * time_step
 
                 # 8. Calcul des contraintes réelles (Heat Map physique)
                 # La contrainte est désormais proportionnelle aux forces internes générées dans le matériau
@@ -273,7 +300,17 @@ async def simulation_stream(websocket: WebSocket):
 
                 # 9. Construction et envoi du payload final
                 is_last_step = (frame_id == num_steps)
+
+                # --- ÉCRITURE DES DONNÉES DE DIAGNOSTIC ---
+                max_u = float(np.max(np.abs(u_blade)))
+                max_f_ext = float(np.max(np.abs(F_ext)))
+                max_f_int = float(np.max(np.abs(F_int)))
+                max_stress = float(max(stresses)) if stresses else 0.0
+                max_u_o = float(np.max(np.abs(u_obs))) if len(u_obs) > 0 else 0.0
                 
+                with open(log_filename, "a") as f:
+                    f.write(f"{frame_id},{current_time:.6f},{max_u:.5e},{max_f_ext:.5e},{max_f_int:.5e},{max_stress:.5e},{max_u_o:.5e}\n")
+
                 frame_payload = {
                     "step": frame_id,
                     "time": current_time,
