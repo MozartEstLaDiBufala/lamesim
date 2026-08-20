@@ -278,7 +278,7 @@ async def simulation_stream(websocket: WebSocket):
                         # 3. Mécanique de contact
                         if detector:
                             contacts = detector.detect_penetrations(current_blade_nodes)
-                            penalty_stiffness = 5e5  
+                            penalty_stiffness = 1e5  
                             
                             for idx_node, idx_el in contacts:
                                 node = current_blade_nodes[idx_node]
@@ -306,7 +306,7 @@ async def simulation_stream(websocket: WebSocket):
                                 F_ext_obs[2*n3+1] -= force_y / 3.0
 
                         # 4. Accélérations
-                        damping_factor = 2.0  
+                        damping_factor = 15.0
                         
                         if M_blade is not None:
                             for i in range(2 * num_nodes):

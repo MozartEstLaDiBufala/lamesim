@@ -5,12 +5,12 @@ from scipy.sparse import lil_matrix
 # Base de données des propriétés physiques
 MATERIALS = {
     "steel": {
-        "E": 5e6,         # Module de Young en Pascals Réduit de 200 GPa à 5 MPa pour la stabilité numérique       
+        "E": 5e9,         # Module de Young en Pascals Réduit de 200 GPa à 5 MPa pour la stabilité numérique       
         "nu": 0.3,        # Coefficient de Poisson (sans unité)
         "rho": 7850       # Densité en kg/m³
     },
     "wood": {
-        "E": 1e5,        # Module de Young pour le bois (10 GPa) reduit egalement
+        "E": 5e4,        # Module de Young pour le bois (10 GPa) reduit egalement
         "nu": 0.4,
         "rho": 600
     }
