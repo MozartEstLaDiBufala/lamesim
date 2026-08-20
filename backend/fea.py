@@ -1,20 +1,9 @@
 #FINIT ELEMENT ANALYSIS
 import numpy as np
 from scipy.sparse import lil_matrix
+from backend.config_p import settings
 
-# Base de données des propriétés physiques
-MATERIALS = {
-    "steel": {
-        "E": 5e9,         # Module de Young en Pascals Réduit de 200 GPa à 5 MPa pour la stabilité numérique       
-        "nu": 0.3,        # Coefficient de Poisson (sans unité)
-        "rho": 7850       # Densité en kg/m³
-    },
-    "wood": {
-        "E": 5e4,        # Module de Young pour le bois (10 GPa) reduit egalement
-        "nu": 0.4,
-        "rho": 600
-    }
-}
+MATERIALS = settings.get("materials", {})
 
 class ElementCST:
     """Classe gérant la physique d'un élément triangulaire CST 2D."""

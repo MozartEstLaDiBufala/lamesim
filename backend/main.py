@@ -1,6 +1,7 @@
 import asyncio
 import json
 import math
+import traceback
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ValidationError
@@ -11,6 +12,7 @@ import numpy as np
 
 from backend.collision import CollisionDetector
 from backend.fea import SystemAssembler
+from backend.config_p import settings
 
 app = FastAPI(title="BladeSim API - Streaming Edition")
 
@@ -26,16 +28,16 @@ app.add_middleware(
 class Point(BaseModel):
     x: float
     y: float
-    t: float = 1.0 #par defaut
+    t: float
 
 # Modèle pour les éléments avec matériaux
 class Element(BaseModel):
-    nodes: list[int]
-    material: str = "steel"
+    nodes: List[int]
+    material: str
 
 class Mesh(BaseModel):
-    vertices: list[Point] = []
-    elements: list[Element] = []
+    vertices: List[Point] = []
+    elements: List[Element] = []
 
 class Velocity(BaseModel):
     startX: float
@@ -44,26 +46,38 @@ class Velocity(BaseModel):
     endY: float
 
 class Kinematics(BaseModel):
-    velocity: Optional[Velocity] = None # pour recevoir "null" sans crasher
-    impactSpeed: float = 14.0
+    velocity: Optional[Velocity]
+    impactSpeed: float
 
 class BoundaryConditions(BaseModel):
-    fixed_nodes: list[int] = []
+    fixed_nodes: List[int] = []
 
 class BladeModel(BaseModel):
     mesh: Mesh
     kinematics: Kinematics
-    boundary_conditions: Optional[BoundaryConditions] = None
+    boundary_conditions: Optional[BoundaryConditions] = None #par defaut
 
 class ObstacleModel(BaseModel):
     mesh: Mesh
-    boundary_conditions: Optional[BoundaryConditions] = None
+    boundary_conditions: Optional[BoundaryConditions] = None #par defaut
 
 class SimulationPayload(BaseModel):
     scale_factor: float = 0.001
     parameters: Optional[Dict[str, Any]]
     blade: BladeModel
-    obstacle: Optional[ObstacleModel] = None
+    obstacle: Optional[ObstacleModel] = None #par defaut
+
+# Extraction sécurisée des paramètres du solveur
+SOLVER_CONF = settings.get("solver", {})
+TIME_STEP_PHYSIQUE = float(SOLVER_CONF.get("time_step_physique"))
+PENALTY_STIFFNESS = float(SOLVER_CONF.get("penalty_stiffness"))
+DAMPING_FACTOR = float(SOLVER_CONF.get("damping_factor"))
+
+print("\n=== VERIFICATION DES VARIABLES GLOBALES ===")
+print(f"TIME_STEP_PHYSIQUE : {TIME_STEP_PHYSIQUE} (Type: {type(TIME_STEP_PHYSIQUE)})")
+print(f"PENALTY_STIFFNESS  : {PENALTY_STIFFNESS} (Type: {type(PENALTY_STIFFNESS)})")
+print(f"DAMPING_FACTOR     : {DAMPING_FACTOR} (Type: {type(DAMPING_FACTOR)})")
+print("===========================================\n")
 
 # --- 2. Le point de terminaison asynchrone (WebSocket) ---
 @app.websocket("/stream")
@@ -71,7 +85,8 @@ async def simulation_stream(websocket: WebSocket):
 
     # A. Le serveur accepte la connexion et garde la porte ouverte
     await websocket.accept()
-    print("Connexion WebSocket établie. En attente des données...")
+    logger.info("Connexion WebSocket établie. En attente des données...")
+    print("[DEBUG WEBSOCKET] Client connecté.")
     
     try:
         # B. La boucle infinie : le serveur attend indéfiniment de nouvelles requêtes
@@ -83,11 +98,12 @@ async def simulation_stream(websocket: WebSocket):
             try:
                 # C'est ici que Python compare votre JSON avec la classe Pydantic
                 payload = SimulationPayload(**raw_data)
-                print("[Solveur] Payload validé avec succès.")
+                logger.info("[Solveur] Payload validé avec succès.")
+                print("[DEBUG WEBSOCKET] Payload validé.")
 
             except ValidationError as e:
                 # Si les structures diffèrent, le code entre ici.
-                print("\n=== ÉCHEC DE VALIDATION DU PAYLOAD ===")
+                logger.info("\n=== ÉCHEC DE VALIDATION DU PAYLOAD ===")
                 
                 # Affichage structuré des erreurs exactes
                 for error in e.errors():
@@ -95,10 +111,10 @@ async def simulation_stream(websocket: WebSocket):
                     chemin = " -> ".join([str(loc) for loc in error["loc"]])
                     message = error["msg"]
                     type_erreur = error["type"]
-                    print(f"Erreur sur : [{chemin}]")
-                    print(f"Raison   : {message} (Type: {type_erreur})\n")
+                    logger.info(f"Erreur sur : [{chemin}]")
+                    logger.info(f"Raison   : {message} (Type: {type_erreur})\n")
                 
-                print("=======================================\n")
+                logger.info("=======================================\n")
                 
                 # Optionnel : Renvoyer l'erreur au frontend avant de fermer
                 await websocket.send_json({"error": "Payload invalide", "details": e.errors()})
@@ -112,7 +128,7 @@ async def simulation_stream(websocket: WebSocket):
             impact_speed = payload.blade.kinematics.impactSpeed
             
             if vel is None:
-                print("[Attention] Aucune flèche reçue. Chute verticale par défaut.")
+                logger.info("[Attention] Aucune flèche reçue. Chute verticale par défaut.")
                 dir_x = 0.0
                 dir_y = 1.0 # Le vecteur pointe vers le bas
             else:
@@ -128,25 +144,23 @@ async def simulation_stream(websocket: WebSocket):
             # --- PRÉPARATION DE LA DÉTECTION DE COLLISION ---
             # --- EXTRACTION DES PARAMÈTRES VISUELS (Depuis le frontend) ---
             if payload.parameters:
-                # "simulate_time" correspond à "Durée réelle à simuler" (ex: 3.0 s)
+                # "simulate_time" correspond à "Durée réelle à simuler"
                 total_simulated_time = payload.parameters.get("simulate_time", 0.05)
-                # "num_steps" correspond au "Nombre d'étapes" (ex: 50 frames)
+                # "num_steps" correspond au "Nombre d'étapes"
                 num_steps = int(payload.parameters.get("num_steps",50))
             else:
                 total_simulated_time = 0.05
                 num_steps = 50
 
             # --- 1. CONFIGURATION DU DÉCOUPLAGE TEMPOREL ---
-            time_step_physique = 0.00002  # Pas physique ultra-fin pour la stabilité (20µs)
-            
             # Calcul du temps qui s'écoule entre deux images affichées à l'écran
             temps_visuel_par_frame = total_simulated_time / num_steps 
             
             # Nombre de fois où le moteur physique doit tourner pour générer une frame
-            sub_steps = int(temps_visuel_par_frame / time_step_physique) 
+            sub_steps = int(temps_visuel_par_frame / TIME_STEP_PHYSIQUE) 
             
-            print(f"[Solveur] Simulation: {total_simulated_time}s | Frames: {num_steps}")
-            print(f"[Solveur] Découplage activé : {sub_steps} calculs physiques par image visuelle.")
+            logger.info(f"[Solveur] Simulation: {total_simulated_time}s | Frames: {num_steps}")
+            logger.info(f"[Solveur] Découplage activé : {sub_steps} calculs physiques par image visuelle.")
 
             # 1. On récupère les éléments (triangles) spécifiques à l'obstacle
             obstacle_elements = payload.obstacle.mesh.elements if payload.obstacle else []
@@ -160,10 +174,10 @@ async def simulation_stream(websocket: WebSocket):
             else:
                 detector = None
 
-            print(f"[Solveur] Calcul lancé. Vitesse d'impact: {impact_speed} m/s")
+            logger.info(f"[Solveur] Calcul lancé. Vitesse d'impact: {impact_speed} m/s")
 
             # --- ASSEMBLAGE DES MATRICES GLOBALES FEA ---
-            print("[Solveur] Assemblage des matrices FEA en cours...")
+            logger.info("[Solveur] Assemblage des matrices FEA en cours...")
             
             # 1. Conversion des nœuds Pydantic en dictionnaires pour notre assembleur
             initial_blade_nodes = [{"x": pt.x, "y": pt.y, "t": getattr(pt, 't', 1.0)} for pt in blade_vertices]
@@ -173,19 +187,19 @@ async def simulation_stream(websocket: WebSocket):
             # 2. Construction de K et M pour la Lame
             if initial_blade_nodes and elements:
                 K_blade, M_blade = SystemAssembler.assemble(initial_blade_nodes, elements, scale_factor)
-                print(f"[Solveur] Matrice Lame assemblée : {K_blade.shape}")
+                logger.info(f"[Solveur] Matrice Lame assemblée : {K_blade.shape}")
             else:
                 K_blade, M_blade = None, None
                 
             # 3. Construction de K et M pour l'Obstacle
             if initial_obstacle_nodes and obstacle_elements:
                 K_obstacle, M_obstacle = SystemAssembler.assemble(initial_obstacle_nodes, obstacle_elements, scale_factor)
-                print(f"[Solveur] Matrice Obstacle assemblée : {K_obstacle.shape}")
+                logger.info(f"[Solveur] Matrice Obstacle assemblée : {K_obstacle.shape}")
             else:
                 K_obstacle, M_obstacle = None, None
                 
             # --- INITIALISATION DE LA CINÉMATIQUE (VECTEURS D'ÉTAT) ---
-            print("[Solveur] Initialisation des vecteurs cinématiques...")
+            logger.info("[Solveur] Initialisation des vecteurs cinématiques...")
             
             # --- INITIALISATION DE LA CINÉMATIQUE DE LA LAME ---
             num_nodes = len(initial_blade_nodes)
@@ -277,8 +291,7 @@ async def simulation_stream(websocket: WebSocket):
 
                         # 3. Mécanique de contact
                         if detector:
-                            contacts = detector.detect_penetrations(current_blade_nodes)
-                            penalty_stiffness = 1e5  
+                            contacts = detector.detect_penetrations(current_blade_nodes) 
                             
                             for idx_node, idx_el in contacts:
                                 node = current_blade_nodes[idx_node]
@@ -292,8 +305,8 @@ async def simulation_stream(websocket: WebSocket):
                                 # On doit convertir la pénétration en MÈTRES pour le calcul de la force
                                 delta_m = delta * scale_factor
                                 
-                                force_x = penalty_stiffness * delta_m * nx
-                                force_y = penalty_stiffness * delta_m * ny
+                                force_x = PENALTY_STIFFNESS * delta_m * nx
+                                force_y = PENALTY_STIFFNESS * delta_m * ny
 
                                 F_ext[2*idx_node] += force_x
                                 F_ext[2*idx_node + 1] += force_y
@@ -305,22 +318,20 @@ async def simulation_stream(websocket: WebSocket):
                                 F_ext_obs[2*n3] -= force_x / 3.0
                                 F_ext_obs[2*n3+1] -= force_y / 3.0
 
-                        # 4. Accélérations
-                        damping_factor = 15.0
-                        
+                        # 4. Accélérations                        
                         if M_blade is not None:
                             for i in range(2 * num_nodes):
                                 m_eff = max(M_blade[i], 0.05)
-                                a_blade[i] = (F_ext[i] - F_int[i] - damping_factor * v_blade[i] * m_eff) / m_eff
+                                a_blade[i] = (F_ext[i] - F_int[i] - DAMPING_FACTOR * v_blade[i] * m_eff) / m_eff
                         
                         if M_obstacle is not None:
                             for i in range(2 * num_obs_nodes):
                                 m_eff_o = max(M_obstacle[i], 0.05)
-                                a_obs[i] = (F_ext_obs[i] - F_int_obs[i] - damping_factor * v_obs[i] * m_eff_o) / m_eff_o
+                                a_obs[i] = (F_ext_obs[i] - F_int_obs[i] - DAMPING_FACTOR * v_obs[i] * m_eff_o) / m_eff_o
 
                         # 5. Intégration (Attention : on utilise time_step_physique, pas time_step global)
-                        v_blade += a_blade * time_step_physique
-                        v_obs += a_obs * time_step_physique
+                        v_blade += a_blade * TIME_STEP_PHYSIQUE
+                        v_obs += a_obs * TIME_STEP_PHYSIQUE
                         
                         # 6. Verrouillage des conditions aux limites
                         for idx in fixed_blade_nodes:
@@ -329,8 +340,8 @@ async def simulation_stream(websocket: WebSocket):
                             v_obs[2*idx] = 0.0 ; v_obs[2*idx + 1] = 0.0
 
                         # 7. Mise à jour des déplacements
-                        u_blade += v_blade * time_step_physique
-                        u_obs += v_obs * time_step_physique
+                        u_blade += v_blade * TIME_STEP_PHYSIQUE
+                        u_obs += v_obs * TIME_STEP_PHYSIQUE
                     
                     # --- FIN DE LA BOUCLE INTERNE ---
 
@@ -372,12 +383,12 @@ async def simulation_stream(websocket: WebSocket):
                     await websocket.send_text(json.dumps(frame_payload))
                     await asyncio.sleep(0.05)
                 
-            print("[Solveur] Simulation terminée. En attente d'une nouvelle requête...\n")
+            logger.info("[Solveur] Simulation terminée. En attente d'une nouvelle requête...\n")
 
     except WebSocketDisconnect:
         # L'utilisateur a fermé la page ou rechargé le navigateur
-        print("Déconnexion propre du client WebSocket.")
+        logger.info("Déconnexion propre du client WebSocket.")
     except Exception as e:
-        print(f"Erreur inattendue du solveur : {e}")
+        logger.info(f"Erreur inattendue du solveur : {e}")
 
 

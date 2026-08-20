@@ -1,0 +1,16 @@
+# Configuration du Solveur Physique
+solver:
+  time_step_physique: 0.00002   # Pas physique ultra-fin pour la stabilité (20µs)
+  penalty_stiffness: 1.0e+5      # Force de pénalité de contact
+  damping_factor: 15.0          # Amortissement global (dissipation d'énergie)
+
+# Base de données des propriétés physiques des matériaux
+materials:
+  steel:
+    E: 5.0e+9    # Module de Young réduit (en Pascals)
+    nu: 0.3     # Coefficient de Poisson
+    rho: 7850   # Densité (kg/m³)
+  wood:
+    E: 5.0e+4    # Module de Young du bois
+    nu: 0.4
+    rho: 600
