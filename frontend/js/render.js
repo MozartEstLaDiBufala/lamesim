@@ -1,6 +1,5 @@
 import { blade, obstacle, ruler, appState, materialsDB, simulationState } from './state.js';
 import { isPointInRect } from './mathUtils.js';
-import { updateTargetMass } from './geometry.js'
 
 export const canvas = document.getElementById("canvas");
 export const ctx = canvas.getContext("2d");
@@ -80,21 +79,31 @@ function drawArrow(ctx, fromx, fromy, tox, toy, color = "red", width = 3) {
 function drawEntity(target) {
   let contourToDraw = target.contour; 
   let meshVertices = target.mesh.vertices;
+  // Par défaut, on dessine le maillage initial statique
+  let elementsToDraw = target.mesh ? target.mesh.elements : []; 
   let activeStresses = null;
 
-  // 1. Données de simulation
+  // 1. Données de simulation : Remplacement dynamique de la géométrie et de la topologie
   if (appState.mode === "simulation" && typeof simulationState !== 'undefined' && simulationState.buffer.length > 0) {
     const currentFrame = simulationState.buffer[simulationState.currentIndex];
-    
-    // 1. Sélection dynamique des sommets selon l'objet en cours de dessin
+
+    // 1. Sélection dynamique des sommets ET de la topologie selon l'objet
     let nodes = null;
 
     if (target.type === "blade" && currentFrame.blade_nodes) {
       nodes = currentFrame.blade_nodes;
       activeStresses = currentFrame.stresses || null;
+      // Récupération des nouveaux triangles générés par la fracture
+      if (currentFrame.blade_elements) {
+        elementsToDraw = currentFrame.blade_elements;
+      }
     } else if (target.type === "obstacle" && currentFrame.obstacle_nodes) {
       nodes = currentFrame.obstacle_nodes;
-      activeStresses = currentFrame.obstacle_stresses || null;
+      activeStresses = currentFrame.obstacle_stresses || null; // Si implémenté côté Python
+      // Récupération de la topologie de l'obstacle
+      if (currentFrame.obstacle_elements) {
+        elementsToDraw = currentFrame.obstacle_elements;
+      }
     }
 
     // 2. Remplacement des coordonnées d'origine par les coordonnées simulées
@@ -105,9 +114,9 @@ function drawEntity(target) {
   }
 
   // 2. DESSIN DU MAILLAGE (Placé en arrière-plan)
-  if (target.isClosed && target.mesh && target.mesh.elements.length > 0) {
+  if (target.isClosed && elementsToDraw && elementsToDraw.length > 0) {
     let maxStress = activeStresses ? Math.max(...activeStresses) : 0;
-    
+
     let minT = Infinity, maxT = -Infinity;
     meshVertices.forEach(v => {
       let t = v.t !== undefined ? parseFloat(v.t) : 1.0; 
@@ -115,18 +124,34 @@ function drawEntity(target) {
       if (t > maxT) maxT = t;
     });
 
-    target.mesh.elements.forEach((element, triIndex) => {
-      let v0 = meshVertices[element.nodes[0]];
-      let v1 = meshVertices[element.nodes[1]];
-      let v2 = meshVertices[element.nodes[2]];
-      
+    // On itère sur les éléments dynamiques
+    elementsToDraw.forEach((element, triIndex) => {
+      // Gestion de la différence de format entre le maillage initial (objets) et le flux simulé (tableaux)
+      let n0, n1, n2;
+      if (Array.isArray(element)) {
+         // Format de simulation (Fracture dynamique) : element est [idx0, idx1, idx2]
+         n0 = element[0]; n1 = element[1]; n2 = element[2];
+      } else {
+         // Format statique : element est un objet {nodes: [...], material: ...}
+         n0 = element.nodes[0]; n1 = element.nodes[1]; n2 = element.nodes[2];
+      }
+
+      let v0 = meshVertices[n0];
+      let v1 = meshVertices[n1];
+      let v2 = meshVertices[n2];
+
+      // Sécurité : ignorer le dessin si la fracture a désynchronisé un indice
       if (!v0 || !v1 || !v2) return;
 
       if (v0.t === undefined) v0.t = 1.0;
       if (v1.t === undefined) v1.t = 1.0;
       if (v2.t === undefined) v2.t = 1.0;
 
-      let baseColor = (typeof materialsDB !== 'undefined' && materialsDB[element.material]) ? materialsDB[element.material].color : "rgba(180, 180, 180, 0.7)";
+      // Le matériau est conservé du maillage initial statique (simplification temporelle)
+      let matName = (element.material !== undefined) ? element.material : 
+                    (target.mesh.elements[0] ? target.mesh.elements[0].material : "steel");
+      let baseColor = (typeof materialsDB !== 'undefined' && materialsDB[matName]) ? 
+                       materialsDB[matName].color : "rgba(180, 180, 180, 0.7)";
 
       if (appState.mode === "simulation" && activeStresses && activeStresses[triIndex] !== undefined) {
         ctx.fillStyle = getStressColor(activeStresses[triIndex], maxStress, baseColor);
@@ -147,7 +172,7 @@ function drawEntity(target) {
 
         drawThicknessOverlay(ctx, v0, v1, v2, minT, maxT);
       }
-      
+
       if (appState.showMeshLines) {
         ctx.strokeStyle = target.type === "blade" ? "rgba(150, 150, 150, 0.5)" : "#87CEFA";
         ctx.lineWidth = 1;
@@ -167,7 +192,7 @@ function drawEntity(target) {
     ctx.lineWidth = 2;
     ctx.beginPath();
     
-    // CORRECTION : On s'arrête strictement à la taille du contour d'origine
+    // On s'arrête strictement à la taille du contour d'origine
     const numBoundaryPoints = target.contour.length;
     
     ctx.moveTo(contourToDraw[0].x, contourToDraw[0].y);
@@ -498,9 +523,6 @@ export function drawRuler(ctx) {
 }
 
 export function redraw() {
-  //console.log("redraw")
-  updateTargetMass(blade);
-  updateTargetMass(obstacle);
   
   //Recalcul du centre de gravité de la lame
   if (blade.contour.length > 0 && blade.kinematics && blade.kinematics.velocity && appState.mode !== "simulation") {

@@ -2,7 +2,7 @@ import { appState, blade, obstacle, ruler, historyManager, overwriteState, simul
 import { canvas, ctx, redraw } from './render.js';
 import { runSimulation, connectSimulationStream, updateTimelineUI } from './network.js';
 import { distance, isPointInTriangle, pointToSegmentDistance } from './mathUtils.js';
-import { findClosestPoint, findClosestInternalEdge, rebuildRegionsFromEdges, generateMesh, splitRegion } from './geometry.js';
+import { findClosestPoint, findClosestInternalEdge, rebuildRegionsFromEdges, generateMesh, splitRegion, updateTargetMass } from './geometry.js';
 
 function updateHistoryUI() {
   const btnUndo = document.getElementById("btn-undo"), btnRedo = document.getElementById("btn-redo");
@@ -474,6 +474,15 @@ export function initEvents() {
   });
 
   window.addEventListener("mouseup", (e) => {
+
+    try { 
+      updateTargetMass(blade);
+      updateTargetMass(obstacle);}
+    catch (e) {
+    console.info("[Update Mass] Erreur lors du calcul de masse :", e);
+    }
+
+    
     const rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;

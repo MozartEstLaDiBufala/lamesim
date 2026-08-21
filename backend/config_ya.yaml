@@ -1,6 +1,6 @@
 # Configuration du Solveur Physique
 solver:
-  time_step_physique: 0.00002   # Pas physique ultra-fin pour la stabilité (20µs)
+  time_step_physique: 1.0e-6   # Pas physique ultra-fin pour la stabilité (1µs)
   penalty_stiffness: 1.0e+5      # Force de pénalité de contact
   damping_factor: 15.0          # Amortissement global (dissipation d'énergie)
 
@@ -8,9 +8,11 @@ solver:
 materials:
   steel:
     E: 5.0e+9    # Module de Young réduit (en Pascals)
-    nu: 0.3     # Coefficient de Poisson
-    rho: 7850   # Densité (kg/m³)
+    nu: 0.3      # Coefficient de Poisson
+    rho: 7850    # Densité (kg/m³)
+    sigma_yield: 2.5e+8   # Limite élastique (Pascals)
   wood:
     E: 5.0e+4    # Module de Young du bois
-    nu: 0.4
-    rho: 600
+    nu: 0.4      # Coefficient de Poisson
+    rho: 600     # Densité (kg/m³)
+    sigma_uts: 4.0e+7     # Résistance ultime en traction (Pascals)

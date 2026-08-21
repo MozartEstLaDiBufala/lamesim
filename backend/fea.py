@@ -1,6 +1,5 @@
-#FINIT ELEMENT ANALYSIS
+# FINITE ELEMENT ANALYSIS
 import numpy as np
-from scipy.sparse import lil_matrix
 from backend.config_p import settings
 
 MATERIALS = settings.get("materials", {})
@@ -20,88 +19,120 @@ class ElementCST:
         return coef * D
 
     @staticmethod
-    def compute_stiffness_matrix(p1, p2, p3, t, material_name):
+    def precompute_properties(p1, p2, p3, t_px, material_name, scale_factor=0.001):
         """
-        Calcule la matrice de rigidité locale (6x6) d'un triangle.
-        p1, p2, p3 : Dictionnaires avec {'x': float, 'y': float}
+        Pré-calcule les matrices invariables B et D d'un élément triangulaire.
+        Effectue la conversion immédiate des pixels en mètres.
         """
-        # 1. Extraction des coordonnées
-        x1, y1 = p1['x'], p1['y']
-        x2, y2 = p2['x'], p2['y']
-        x3, y3 = p3['x'], p3['y']
+        # 1. Extraction et conversion immédiate en mètres
+        x1, y1 = p1['x'] * scale_factor, p1['y'] * scale_factor
+        x2, y2 = p2['x'] * scale_factor, p2['y'] * scale_factor
+        x3, y3 = p3['x'] * scale_factor, p3['y'] * scale_factor
+        t_m = t_px * scale_factor
 
-        # 2. Calcul de l'aire géométrique du triangle
+        # 2. Calcul de l'aire géométrique (en m²)
         A = 0.5 * abs(x1*(y2 - y3) + x2*(y3 - y1) + x3*(y1 - y2))
         
-        # Sécurité pour éviter les divisions par zéro si le triangle est plat
-        if A < 1e-10:
-            return np.zeros((6, 6)), 0.0
+        # Sécurité : ignorer les éléments de surface nulle
+        if A < 1e-12:
+            return None
 
-        # 3. Matrice B (Déformation-Déplacement)
+        # 3. Matrice géométrique B (Déformation-Déplacement, en m^-1)
         B = (1.0 / (2.0 * A)) * np.array([
             [y2 - y3, 0,       y3 - y1, 0,       y1 - y2, 0      ],
             [0,       x3 - x2, 0,       x1 - x3, 0,       x2 - x1],
             [x3 - x2, y2 - y3, x1 - x3, y3 - y1, x2 - x1, y1 - y2]
         ])
 
-        # 4. Matrice D (Matériau)
+        # 4. Matrice matérielle D
         mat = MATERIALS.get(material_name, MATERIALS["steel"])
         D = ElementCST.get_D_matrix(mat["E"], mat["nu"])
 
-        # 5. Calcul matriciel final : Ke = t * A * B^T * D * B
-        Ke = t * A * np.dot(B.T, np.dot(D, B))
+        # 5. Calcul de la masse locale (en kg)
+        rho = mat["rho"]
+        m_total = A * t_m * rho
+        m_node = m_total / 3.0 
+
+        return {
+            'A': A,
+            't': t_m,
+            'B': B,
+            'D': D,
+            'm_node': m_node
+        }
+
+    @staticmethod
+    def check_failure(sigma, material_name):
+        """Vérifie si l'élément a atteint son point de rupture."""
+        mat = MATERIALS.get(material_name, MATERIALS["steel"])
+        sig_x, sig_y, tau_xy = sigma[0], sigma[1], sigma[2]
         
-        return Ke, A
+        if material_name == "steel":
+            # Critère de Von Mises pour matériaux ductiles
+            von_mises = np.sqrt(sig_x**2 + sig_y**2 - sig_x*sig_y + 3 * tau_xy**2)
+            limit = mat.get("sigma_yield", 2.5e8) # Limite par défaut : 250 MPa
+            return von_mises >= limit
+            
+        elif material_name == "wood":
+            # Critère de la contrainte principale maximale (Rankine) pour matériaux fragiles
+            # Contrainte de traction maximale (sigma_1)
+            sigma_1 = (sig_x + sig_y) / 2.0 + np.sqrt(((sig_x - sig_y) / 2.0)**2 + tau_xy**2)
+            limit = mat.get("sigma_uts", 4.0e7) # Limite par défaut : 40 MPa
+            # Le bois ne cède qu'en traction (sigma_1 positive)
+            return sigma_1 >= limit and sigma_1 > 0 
+            
+        return False
+
+    
+
 
 class SystemAssembler:
+    """Classe chargée de préparer le maillage pour l'intégration temporelle."""
+    
     @staticmethod
-    def assemble(nodes_dict_list, elements, scale_factor=0.001):
+    def precompute_system(nodes_dict_list, elements, scale_factor=0.001):
         """
-        Assemble la matrice de rigidité globale K et le vecteur de masse globale M.
-        L'intégration du scale_factor (0.001 par défaut) convertit les pixels en mètres.
+        Remplace l'ancienne fonction assemble().
+        Retourne une liste contenant les propriétés pré-calculées de chaque élément,
+        ainsi que le vecteur de masse globale M.
         """
         num_nodes = len(nodes_dict_list)
-        K_global = lil_matrix((2 * num_nodes, 2 * num_nodes))
-        M_global = np.zeros(2 * num_nodes) 
+        M_global = np.zeros(2 * num_nodes)
+        
+        elements_data = []
 
         for el in elements:
             n1, n2, n3 = el.nodes[0], el.nodes[1], el.nodes[2]
             p1, p2, p3 = nodes_dict_list[n1], nodes_dict_list[n2], nodes_dict_list[n3]
             
-            t = p1.get('t', 1.0)
+            t_px = p1.get('t', 1.0)
             mat_name = getattr(el, 'material', 'steel')
             
-            # Calcul de Ke local avec les dimensions brutes (en pixels)
-            Ke, Area_px = ElementCST.compute_stiffness_matrix(p1, p2, p3, t, mat_name)
-            if Area_px < 1e-10:
+            # Pré-calcul des propriétés physiques et géométriques
+            props = ElementCST.precompute_properties(p1, p2, p3, t_px, mat_name, scale_factor)
+            
+            if props is None:
                 continue
                 
-            # --- CORRECTION PHYSIQUE DES UNITÉS ---
-            # 1. Conversion de la matrice de rigidité : 
-            # Mathématiquement, K dépend linéairement de l'échelle spatiale.
-            Ke_corrected = Ke * scale_factor
-
-            # 2. Conversion de la géométrie en mètres pour la masse
-            area_m2 = Area_px * (scale_factor ** 2)
-            t_m = t * scale_factor
-            
-            # Calcul de la masse réelle du triangle (en kg)
-            rho = MATERIALS.get(mat_name, MATERIALS["steel"])["rho"]
-            m_total = area_m2 * t_m * rho
-            m_node = m_total / 3.0 
-            
+            # Tableau des Degrés De Liberté (DDL)
             ddls = [
                 2*n1, 2*n1+1,
                 2*n2, 2*n2+1,
                 2*n3, 2*n3+1
             ]
             
-            # Assemblage avec les valeurs physiquement correctes
-            for i in range(6):
-                for j in range(6):
-                    K_global[ddls[i], ddls[j]] += Ke_corrected[i, j]
+            # Sauvegarde des données nécessaires au calcul de F_int
+            elements_data.append({
+                'nodes': [n1, n2, n3],
+                'ddls': ddls,
+                'B': props['B'],
+                'D': props['D'],
+                'A': props['A'],
+                't': props['t']
+            })
             
+            # Assemblage dynamique du vecteur de masse modale
             for i in range(6):
-                M_global[ddls[i]] += m_node
+                M_global[ddls[i]] += props['m_node']
                 
-        return K_global.tocsr(), M_global
+        return elements_data, M_global

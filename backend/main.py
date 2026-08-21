@@ -1,3 +1,4 @@
+import time
 import asyncio
 import json
 import math
@@ -13,6 +14,7 @@ import numpy as np
 from backend.collision import CollisionDetector
 from backend.fea import SystemAssembler
 from backend.config_p import settings
+from backend.fracture import FractureManager
 
 app = FastAPI(title="BladeSim API - Streaming Edition")
 
@@ -184,19 +186,19 @@ async def simulation_stream(websocket: WebSocket):
             initial_obstacle_nodes = [{"x": pt.x, "y": pt.y, "t": getattr(pt, 't', 1.0)} for pt in obstacle_vertices]
             scale_factor = payload.scale_factor # On récupère l'échelle du JSON
             
-            # 2. Construction de K et M pour la Lame
+            # 2. Construction des propriétés et M pour la Lame
             if initial_blade_nodes and elements:
-                K_blade, M_blade = SystemAssembler.assemble(initial_blade_nodes, elements, scale_factor)
-                logger.info(f"[Solveur] Matrice Lame assemblée : {K_blade.shape}")
+                blade_elements_data, M_blade = SystemAssembler.precompute_system(initial_blade_nodes, elements, scale_factor)
+                logger.info(f"[Solveur] Lame pré-calculée : {len(blade_elements_data)} éléments.")
             else:
-                K_blade, M_blade = None, None
+                blade_elements_data, M_blade = [], None
                 
-            # 3. Construction de K et M pour l'Obstacle
+            # 3. Construction des propriétés et M pour l'Obstacle
             if initial_obstacle_nodes and obstacle_elements:
-                K_obstacle, M_obstacle = SystemAssembler.assemble(initial_obstacle_nodes, obstacle_elements, scale_factor)
-                logger.info(f"[Solveur] Matrice Obstacle assemblée : {K_obstacle.shape}")
+                obstacle_elements_data, M_obstacle = SystemAssembler.precompute_system(initial_obstacle_nodes, obstacle_elements, scale_factor)
+                logger.info(f"[Solveur] Obstacle pré-calculé : {len(obstacle_elements_data)} éléments.")
             else:
-                K_obstacle, M_obstacle = None, None
+                obstacle_elements_data, M_obstacle = [], None
                 
             # --- INITIALISATION DE LA CINÉMATIQUE (VECTEURS D'ÉTAT) ---
             logger.info("[Solveur] Initialisation des vecteurs cinématiques...")
@@ -233,28 +235,56 @@ async def simulation_stream(websocket: WebSocket):
             # --- LA DOUBLE BOUCLE ---
             # Boucle externe : Gère ce que l'utilisateur voit
             for frame_id in range(num_steps + 1):
-                # 1. Projection des nœuds à l'instant T (Pour la frame 0, u_blade vaut 0)
-                current_blade_nodes = [
-                    {"x": float(pt["x"] + u_blade[2*i] / scale_factor), 
-                     "y": float(pt["y"] + u_blade[2*i+1] / scale_factor)} 
-                    for i, pt in enumerate(initial_blade_nodes)
-                ]
-                                    
-                current_obstacle_nodes = [
-                    {"x": float(pt["x"] + u_obs[2*i] / scale_factor), 
-                     "y": float(pt["y"] + u_obs[2*i+1] / scale_factor)} 
-                    for i, pt in enumerate(initial_obstacle_nodes)
-                ]
+                # 1. Projection dynamique des nœuds (Lame)
+                current_blade_nodes = []
+                num_current_blade_nodes = len(u_blade) // 2
                 
-                # 2. Construction et ENVOI du payload avant de modifier la physique
+                for i in range(num_current_blade_nodes):
+                    # Si le nœud existe depuis le début, on lit ses coordonnées initiales
+                    if i < len(initial_blade_nodes):
+                        pt = initial_blade_nodes[i]
+                    # Si c'est un nœud créé par la fracture, on sécurise en attendant 
+                    # que fracture.py mette à jour la liste des coordonnées de base.
+                    else:
+                        pt = initial_blade_nodes[0] 
+                        
+                    current_blade_nodes.append({
+                        "x": float(pt["x"] + u_blade[2*i] / scale_factor),
+                        "y": float(pt["y"] + u_blade[2*i+1] / scale_factor)
+                    })
+                
+                # 2. Projection dynamique des nœuds (Obstacle)
+                current_obstacle_nodes = []
+                num_current_obs_nodes = len(u_obs) // 2
+                
+                for i in range(num_current_obs_nodes):
+                    if i < len(initial_obstacle_nodes):
+                        pt = initial_obstacle_nodes[i]
+                    else:
+                        pt = initial_obstacle_nodes[0]
+                        
+                    current_obstacle_nodes.append({
+                        "x": float(pt["x"] + u_obs[2*i] / scale_factor),
+                        "y": float(pt["y"] + u_obs[2*i+1] / scale_factor)
+                    })
+
+                # 3. Extraction de la connectivité dynamique (NOUVEAU)
+                current_blade_elements = [el['nodes'] for el in blade_elements_data] if M_blade is not None else []
+                current_obstacle_elements = [el['nodes'] for el in obstacle_elements_data] if M_obstacle is not None else []
+
+                # 4. Construction et ENVOI du payload
                 current_time = frame_id * temps_visuel_par_frame
                 
                 frame_payload = {
-                    "step": frame_id,      # CORRECTION : Utilisation dynamique de frame_id
-                    "time": current_time,  # CORRECTION : Utilisation du temps calculé
+                    "step": frame_id,
+                    "time": current_time,
                     "blade_displacement_cm": float(np.mean(u_blade[1::2])) * 100,
                     "blade_nodes": current_blade_nodes,
                     "obstacle_nodes": current_obstacle_nodes,
+                    "blade_elements": current_blade_elements,       
+                    "obstacle_elements": current_obstacle_elements, 
+                    "blade_elements": current_blade_elements,       
+                    "obstacle_elements": current_obstacle_elements, 
                     "stresses": stresses,
                     "is_finished": (frame_id == num_steps)
                 }
@@ -262,16 +292,25 @@ async def simulation_stream(websocket: WebSocket):
                 # On envoie l'état au navigateur
                 await websocket.send_text(json.dumps(frame_payload))
                 await asyncio.sleep(0.01) # Pause réseau minimale
-                
+
+                # --- CHRONOMÉTRAGE DE LA FRAME ---
+                t_contact = 0.0
+                t_forces = 0.0
+                t_fracture = 0.0
+
                 # 3. Calcul de l'état physique SUIVANT (Ignoré si on est à la dernière frame)
                 if frame_id < num_steps:
 
                     # --- BOUCLE INTERNE : LA PHYSIQUE PURE ---
                     for _ in range(sub_steps):
-                        
+
+                        #chrono
+                        start_time = time.perf_counter()
+
                         # 1. Calcul des forces internes
-                        F_int = K_blade.dot(u_blade) if K_blade is not None else np.zeros(2 * num_nodes)
-                        F_int_obs = K_obstacle.dot(u_obs) if K_obstacle is not None else np.zeros(2 * num_obs_nodes)
+                        # Réinitialisation des vecteurs de force globale
+                        F_int = np.zeros(2 * num_nodes)
+                        F_int_obs = np.zeros(2 * num_obs_nodes)
                         
                         F_ext = np.zeros(2 * num_nodes)
                         F_ext_obs = np.zeros(2 * num_obs_nodes)
@@ -318,10 +357,34 @@ async def simulation_stream(websocket: WebSocket):
                                 F_ext_obs[2*n3] -= force_x / 3.0
                                 F_ext_obs[2*n3+1] -= force_y / 3.0
 
-                        # 4. Accélérations                        
+                        #chrono
+                        t_contact += (time.perf_counter() - start_time)
+                        start_time = time.perf_counter()
+
+                        # --- 4.1. Accumulation des Forces Internes (Scatter) ---
+                        if M_blade is not None:
+                            for el in blade_elements_data:
+                                ddls = el['ddls']
+                                u_e = u_blade[ddls]
+                                epsilon = np.dot(el['B'], u_e)
+                                sigma = np.dot(el['D'], epsilon)
+                                F_e = el['A'] * el['t'] * np.dot(el['B'].T, sigma)
+                                F_int[ddls] += F_e
+
+                        # Accumulation pour l'Obstacle
+                        if M_obstacle is not None:
+                            for el in obstacle_elements_data:
+                                ddls = el['ddls']
+                                u_e = u_obs[ddls]
+                                epsilon = np.dot(el['B'], u_e)
+                                sigma = np.dot(el['D'], epsilon)
+                                F_e = el['A'] * el['t'] * np.dot(el['B'].T, sigma)
+                                F_int_obs[ddls] += F_e
+
+                        # --- 4.2. Calcul des Accélérations (Loi de Newton) ---
                         if M_blade is not None:
                             for i in range(2 * num_nodes):
-                                m_eff = max(M_blade[i], 0.05)
+                                m_eff = max(M_blade[i], 0.05) # Mass Scaling pour la stabilité
                                 a_blade[i] = (F_ext[i] - F_int[i] - DAMPING_FACTOR * v_blade[i] * m_eff) / m_eff
                         
                         if M_obstacle is not None:
@@ -329,35 +392,64 @@ async def simulation_stream(websocket: WebSocket):
                                 m_eff_o = max(M_obstacle[i], 0.05)
                                 a_obs[i] = (F_ext_obs[i] - F_int_obs[i] - DAMPING_FACTOR * v_obs[i] * m_eff_o) / m_eff_o
 
-                        # 5. Intégration (Attention : on utilise time_step_physique, pas time_step global)
+                        # 5. Intégration (Mise à jour des vitesses)
                         v_blade += a_blade * TIME_STEP_PHYSIQUE
                         v_obs += a_obs * TIME_STEP_PHYSIQUE
                         
                         # 6. Verrouillage des conditions aux limites
                         for idx in fixed_blade_nodes:
-                            v_blade[2*idx] = 0.0 ; v_blade[2*idx + 1] = 0.0
+                            if 2*idx + 1 < len(v_blade): # Sécurité de taille
+                                v_blade[2*idx] = 0.0 ; v_blade[2*idx + 1] = 0.0
                         for idx in fixed_obs_nodes:
-                            v_obs[2*idx] = 0.0 ; v_obs[2*idx + 1] = 0.0
+                            if 2*idx + 1 < len(v_obs):
+                                v_obs[2*idx] = 0.0 ; v_obs[2*idx + 1] = 0.0
 
                         # 7. Mise à jour des déplacements
                         u_blade += v_blade * TIME_STEP_PHYSIQUE
                         u_obs += v_obs * TIME_STEP_PHYSIQUE
-                    
+
+                        #chrono
+                        t_forces += (time.perf_counter() - start_time)
+                        start_time = time.perf_counter()
+
+                        # --- 8. MÉCANIQUE DE LA RUPTURE (Fracture Mechanics) ---
+                        if M_blade is not None:
+                            blade_elements_data, u_blade, v_blade, a_blade, M_blade, cracked_b = \
+                                FractureManager.process_fracture(blade_elements_data, u_blade, v_blade, a_blade, M_blade, "steel")
+                            
+                            if cracked_b:
+                                num_nodes = len(u_blade) // 2 # Mise à jour dynamique de la taille
+                                
+                        if M_obstacle is not None:
+                            obstacle_elements_data, u_obs, v_obs, a_obs, M_obstacle, cracked_o = \
+                                FractureManager.process_fracture(obstacle_elements_data, u_obs, v_obs, a_obs, M_obstacle, "wood")
+                                
+                            if cracked_o:
+                                num_obs_nodes = len(u_obs) // 2
+
+                        
+                        t_fracture += (time.perf_counter() - start_time)
+
                     # --- FIN DE LA BOUCLE INTERNE ---
 
                     # Le temps visuel calculé est transmis au frontend
                     current_time = frame_id * temps_visuel_par_frame
 
-                    # 8. Calcul des contraintes réelles (Heat Map physique)
+                    # 9. Calcul des contraintes réelles (Heat Map physique)
                     # La contrainte est désormais proportionnelle aux forces internes générées dans le matériau
                     stresses = []
-                    for el in elements:
-                        n1, n2, n3 = el.nodes[0], el.nodes[1], el.nodes[2]
-                        # Moyenne des efforts de rappel sur les 3 sommets du triangle
-                        f_el = (abs(F_int[2*n1]) + abs(F_int[2*n1+1]) + 
-                                abs(F_int[2*n2]) + abs(F_int[2*n2+1]) + 
-                                abs(F_int[2*n3]) + abs(F_int[2*n3+1])) / 3.0
-                        stresses.append(float(f_el)) 
+                    for el in blade_elements_data:
+                        ddls = el['ddls']
+                        u_e = u_blade[ddls]
+                        
+                        epsilon = np.dot(el['B'], u_e)
+                        sigma = np.dot(el['D'], epsilon) # [sigma_x, sigma_y, tau_xy]
+                        
+                        # Calcul strict de Von Mises
+                        sig_x, sig_y, tau_xy = sigma[0], sigma[1], sigma[2]
+                        von_mises = np.sqrt(sig_x**2 + sig_y**2 - sig_x*sig_y + 3 * tau_xy**2)
+                        
+                        stresses.append(float(von_mises))
 
                     # --- ÉCRITURE DES DONNÉES DE DIAGNOSTIC ---
                     max_u = float(np.max(np.abs(u_blade)))
@@ -376,9 +468,19 @@ async def simulation_stream(websocket: WebSocket):
                         "blade_displacement_cm": float(np.mean(u_blade[1::2])) * 100, # Moyenne du déplacement Y en cm
                         "blade_nodes": current_blade_nodes,
                         "obstacle_nodes": current_obstacle_nodes,
+                        "blade_elements": current_blade_elements,       
+                        "obstacle_elements": current_obstacle_elements, 
                         "stresses": stresses,
                         "is_finished": (frame_id == num_steps)
                     }
+
+                    # Affichage des statistiques dans la console pour cette frame
+                    total_frame_time = t_contact + t_forces + t_fracture
+                    if total_frame_time > 0:
+                        print(f"\n[FRAME {frame_id}] Temps total calcul : {total_frame_time:.3f} s")
+                        print(f" -> Contact  : {(t_contact/total_frame_time)*100:.1f}% ({t_contact:.3f} s)")
+                        print(f" -> Forces   : {(t_forces/total_frame_time)*100:.1f}% ({t_forces:.3f} s)")
+                        print(f" -> Fracture : {(t_fracture/total_frame_time)*100:.1f}% ({t_fracture:.3f} s)")
                     
                     await websocket.send_text(json.dumps(frame_payload))
                     await asyncio.sleep(0.05)
