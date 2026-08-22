@@ -7,8 +7,6 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ValidationError
 from typing import Optional, List, Dict, Any
-import logging
-logger = logging.getLogger(__name__)
 import numpy as np
 
 from backend.collision import CollisionDetector
@@ -87,7 +85,6 @@ async def simulation_stream(websocket: WebSocket):
 
     # A. Le serveur accepte la connexion et garde la porte ouverte
     await websocket.accept()
-    logger.info("Connexion WebSocket établie. En attente des données...")
     print("[DEBUG WEBSOCKET] Client connecté.")
     
     try:
@@ -100,12 +97,11 @@ async def simulation_stream(websocket: WebSocket):
             try:
                 # C'est ici que Python compare votre JSON avec la classe Pydantic
                 payload = SimulationPayload(**raw_data)
-                logger.info("[Solveur] Payload validé avec succès.")
                 print("[DEBUG WEBSOCKET] Payload validé.")
 
             except ValidationError as e:
                 # Si les structures diffèrent, le code entre ici.
-                logger.info("\n=== ÉCHEC DE VALIDATION DU PAYLOAD ===")
+                print("\n=== ÉCHEC DE VALIDATION DU PAYLOAD ===")
                 
                 # Affichage structuré des erreurs exactes
                 for error in e.errors():
@@ -113,10 +109,10 @@ async def simulation_stream(websocket: WebSocket):
                     chemin = " -> ".join([str(loc) for loc in error["loc"]])
                     message = error["msg"]
                     type_erreur = error["type"]
-                    logger.info(f"Erreur sur : [{chemin}]")
-                    logger.info(f"Raison   : {message} (Type: {type_erreur})\n")
+                    print(f"Erreur sur : [{chemin}]")
+                    print(f"Raison   : {message} (Type: {type_erreur})\n")
                 
-                logger.info("=======================================\n")
+                print("=======================================\n")
                 
                 # Optionnel : Renvoyer l'erreur au frontend avant de fermer
                 await websocket.send_json({"error": "Payload invalide", "details": e.errors()})
@@ -130,7 +126,7 @@ async def simulation_stream(websocket: WebSocket):
             impact_speed = payload.blade.kinematics.impactSpeed
             
             if vel is None:
-                logger.info("[Attention] Aucune flèche reçue. Chute verticale par défaut.")
+                print("[Attention] Aucune flèche reçue. Chute verticale par défaut.")
                 dir_x = 0.0
                 dir_y = 1.0 # Le vecteur pointe vers le bas
             else:
@@ -145,6 +141,7 @@ async def simulation_stream(websocket: WebSocket):
 
             # --- PRÉPARATION DE LA DÉTECTION DE COLLISION ---
             # --- EXTRACTION DES PARAMÈTRES VISUELS (Depuis le frontend) ---
+            print(f"PRÉPARATION DE LA DÉTECTION DE COLLISION")
             if payload.parameters:
                 # "simulate_time" correspond à "Durée réelle à simuler"
                 total_simulated_time = payload.parameters.get("simulate_time", 0.05)
@@ -155,14 +152,15 @@ async def simulation_stream(websocket: WebSocket):
                 num_steps = 50
 
             # --- 1. CONFIGURATION DU DÉCOUPLAGE TEMPOREL ---
+            print(f"1. CONFIGURATION DU DÉCOUPLAGE TEMPOREL")
             # Calcul du temps qui s'écoule entre deux images affichées à l'écran
             temps_visuel_par_frame = total_simulated_time / num_steps 
             
             # Nombre de fois où le moteur physique doit tourner pour générer une frame
             sub_steps = int(temps_visuel_par_frame / TIME_STEP_PHYSIQUE) 
             
-            logger.info(f"[Solveur] Simulation: {total_simulated_time}s | Frames: {num_steps}")
-            logger.info(f"[Solveur] Découplage activé : {sub_steps} calculs physiques par image visuelle.")
+            print(f"[Solveur] Simulation: {total_simulated_time}s | Frames: {num_steps}")
+            print(f"[Solveur] Découplage activé : {sub_steps} calculs physiques par image visuelle.")
 
             # 1. On récupère les éléments (triangles) spécifiques à l'obstacle
             obstacle_elements = payload.obstacle.mesh.elements if payload.obstacle else []
@@ -176,10 +174,10 @@ async def simulation_stream(websocket: WebSocket):
             else:
                 detector = None
 
-            logger.info(f"[Solveur] Calcul lancé. Vitesse d'impact: {impact_speed} m/s")
+            print(f"[Solveur] Calcul lancé. Vitesse d'impact: {impact_speed} m/s")
 
             # --- ASSEMBLAGE DES MATRICES GLOBALES FEA ---
-            logger.info("[Solveur] Assemblage des matrices FEA en cours...")
+            print("[Solveur] Assemblage des matrices FEA en cours...")
             
             # 1. Conversion des nœuds Pydantic en dictionnaires pour notre assembleur
             initial_blade_nodes = [{"x": pt.x, "y": pt.y, "t": getattr(pt, 't', 1.0)} for pt in blade_vertices]
@@ -189,19 +187,44 @@ async def simulation_stream(websocket: WebSocket):
             # 2. Construction des propriétés et M pour la Lame
             if initial_blade_nodes and elements:
                 blade_elements_data, M_blade = SystemAssembler.precompute_system(initial_blade_nodes, elements, scale_factor)
-                logger.info(f"[Solveur] Lame pré-calculée : {len(blade_elements_data)} éléments.")
+                print(f"[Solveur] Lame pré-calculée : {len(blade_elements_data)} éléments.")
             else:
                 blade_elements_data, M_blade = [], None
                 
             # 3. Construction des propriétés et M pour l'Obstacle
             if initial_obstacle_nodes and obstacle_elements:
                 obstacle_elements_data, M_obstacle = SystemAssembler.precompute_system(initial_obstacle_nodes, obstacle_elements, scale_factor)
-                logger.info(f"[Solveur] Obstacle pré-calculé : {len(obstacle_elements_data)} éléments.")
+                print(f"[Solveur] Obstacle pré-calculé : {len(obstacle_elements_data)} éléments.")
             else:
                 obstacle_elements_data, M_obstacle = [], None
-                
+
+            # --- CONVERSION EN TENSEURS 3D (VECTORISATION) ---
+            print("[Solveur] Vectorisation des matrices en cours...")
+            
+            # Lame
+            if M_blade is not None:
+                blade_ddls = np.array([el['ddls'] for el in blade_elements_data], dtype=np.int32)
+                blade_B = np.array([el['B'] for el in blade_elements_data])
+                blade_D = np.array([el['D'] for el in blade_elements_data])
+                blade_vol = np.array([el['A'] * el['t'] for el in blade_elements_data])
+                blade_fractured = np.zeros(len(blade_elements_data), dtype=bool)
+            else:
+                blade_ddls, blade_B, blade_D, blade_vol = None, None, None, None
+
+            # Obstacle
+            if M_obstacle is not None:
+                obs_ddls = np.array([el['ddls'] for el in obstacle_elements_data], dtype=np.int32)
+                obs_B = np.array([el['B'] for el in obstacle_elements_data])
+                obs_D = np.array([el['D'] for el in obstacle_elements_data])
+                obs_vol = np.array([el['A'] * el['t'] for el in obstacle_elements_data])
+                obs_fractured = np.zeros(len(obstacle_elements_data), dtype=bool)
+            else:
+                obs_ddls, obs_B, obs_D, obs_vol = None, None, None, None
+            # ---------------------------------------------------
+
+
             # --- INITIALISATION DE LA CINÉMATIQUE (VECTEURS D'ÉTAT) ---
-            logger.info("[Solveur] Initialisation des vecteurs cinématiques...")
+            print("[Solveur] Initialisation des vecteurs cinématiques...")
             
             # --- INITIALISATION DE LA CINÉMATIQUE DE LA LAME ---
             num_nodes = len(initial_blade_nodes)
@@ -233,21 +256,22 @@ async def simulation_stream(websocket: WebSocket):
             stresses = [0.0] * len(elements)
 
             # --- LA DOUBLE BOUCLE ---
+            print(f"LA DOUBLE BOUCLE")
             # Boucle externe : Gère ce que l'utilisateur voit
             for frame_id in range(num_steps + 1):
+
                 # 1. Projection dynamique des nœuds (Lame)
                 current_blade_nodes = []
                 num_current_blade_nodes = len(u_blade) // 2
                 
                 for i in range(num_current_blade_nodes):
-                    # Si le nœud existe depuis le début, on lit ses coordonnées initiales
+
                     if i < len(initial_blade_nodes):
                         pt = initial_blade_nodes[i]
-                    # Si c'est un nœud créé par la fracture, on sécurise en attendant 
-                    # que fracture.py mette à jour la liste des coordonnées de base.
                     else:
-                        pt = initial_blade_nodes[0] 
-                        
+                        pt = initial_blade_nodes[0]
+
+                    #pt = initial_blade_nodes[i]
                     current_blade_nodes.append({
                         "x": float(pt["x"] + u_blade[2*i] / scale_factor),
                         "y": float(pt["y"] + u_blade[2*i+1] / scale_factor)
@@ -258,11 +282,14 @@ async def simulation_stream(websocket: WebSocket):
                 num_current_obs_nodes = len(u_obs) // 2
                 
                 for i in range(num_current_obs_nodes):
+
                     if i < len(initial_obstacle_nodes):
                         pt = initial_obstacle_nodes[i]
                     else:
                         pt = initial_obstacle_nodes[0]
-                        
+
+                    #pt = initial_obstacle_nodes[i]
+                    
                     current_obstacle_nodes.append({
                         "x": float(pt["x"] + u_obs[2*i] / scale_factor),
                         "y": float(pt["y"] + u_obs[2*i+1] / scale_factor)
@@ -361,25 +388,32 @@ async def simulation_stream(websocket: WebSocket):
                         t_contact += (time.perf_counter() - start_time)
                         start_time = time.perf_counter()
 
-                        # --- 4.1. Accumulation des Forces Internes (Scatter) ---
+                        # --- 4.1. Accumulation Vectorisée des Forces Internes ---
+                        # Pour la Lame
                         if M_blade is not None:
-                            for el in blade_elements_data:
-                                ddls = el['ddls']
-                                u_e = u_blade[ddls]
-                                epsilon = np.dot(el['B'], u_e)
-                                sigma = np.dot(el['D'], epsilon)
-                                F_e = el['A'] * el['t'] * np.dot(el['B'].T, sigma)
-                                F_int[ddls] += F_e
+                            # 1. Extraction locale : shape (N, 6)
+                            u_e_blade = u_blade[blade_ddls]
+                            
+                            # 2. Déformation (epsilon) : shape (N, 3)
+                            epsilon_blade = np.einsum('eij,ej->ei', blade_B, u_e_blade)
+                            
+                            # 3. Contrainte (sigma) : shape (N, 3)
+                            # NOUS SAUVEGARDONS CE TENSEUR POUR L'ALGORITHME DE FRACTURE
+                            sigma_blade = np.einsum('eij,ej->ei', blade_D, epsilon_blade)
+                            
+                            # 4. Forces nodales locales : shape (N, 6)
+                            F_e_blade = np.einsum('eji,ej->ei', blade_B, sigma_blade) * blade_vol[:, np.newaxis]
+                            
+                            # 5. Injection globale (Scatter Add C-optimisé)
+                            np.add.at(F_int, blade_ddls.ravel(), F_e_blade.ravel())
 
-                        # Accumulation pour l'Obstacle
+                        # Pour l'Obstacle
                         if M_obstacle is not None:
-                            for el in obstacle_elements_data:
-                                ddls = el['ddls']
-                                u_e = u_obs[ddls]
-                                epsilon = np.dot(el['B'], u_e)
-                                sigma = np.dot(el['D'], epsilon)
-                                F_e = el['A'] * el['t'] * np.dot(el['B'].T, sigma)
-                                F_int_obs[ddls] += F_e
+                            u_e_obs = u_obs[obs_ddls]
+                            epsilon_obs = np.einsum('eij,ej->ei', obs_B, u_e_obs)
+                            sigma_obs = np.einsum('eij,ej->ei', obs_D, epsilon_obs)
+                            F_e_obs = np.einsum('eji,ej->ei', obs_B, sigma_obs) * obs_vol[:, np.newaxis]
+                            np.add.at(F_int_obs, obs_ddls.ravel(), F_e_obs.ravel())
 
                         # --- 4.2. Calcul des Accélérations (Loi de Newton) ---
                         if M_blade is not None:
@@ -414,17 +448,26 @@ async def simulation_stream(websocket: WebSocket):
 
                         # --- 8. MÉCANIQUE DE LA RUPTURE (Fracture Mechanics) ---
                         if M_blade is not None:
-                            blade_elements_data, u_blade, v_blade, a_blade, M_blade, cracked_b = \
-                                FractureManager.process_fracture(blade_elements_data, u_blade, v_blade, a_blade, M_blade, "steel")
-                            
+                            blade_elements_data, u_blade, v_blade, a_blade, M_blade, blade_ddls, blade_fractured, cracked_b, split_parents_b = \
+                                FractureManager.process_fracture_vectorized(
+                                    blade_elements_data, u_blade, v_blade, a_blade, M_blade, 
+                                    sigma_blade, blade_ddls, blade_fractured, "steel"
+                                )
                             if cracked_b:
-                                num_nodes = len(u_blade) // 2 # Mise à jour dynamique de la taille
+                                # Le nouveau nœud hérite des coordonnées absolues de son parent
+                                for p_idx in split_parents_b:
+                                    initial_blade_nodes.append(initial_blade_nodes[p_idx].copy())
+                                num_nodes = len(u_blade) // 2
                                 
                         if M_obstacle is not None:
-                            obstacle_elements_data, u_obs, v_obs, a_obs, M_obstacle, cracked_o = \
-                                FractureManager.process_fracture(obstacle_elements_data, u_obs, v_obs, a_obs, M_obstacle, "wood")
-                                
+                            obstacle_elements_data, u_obs, v_obs, a_obs, M_obstacle, obs_ddls, obs_fractured, cracked_o, split_parents_o = \
+                                FractureManager.process_fracture_vectorized(
+                                    obstacle_elements_data, u_obs, v_obs, a_obs, M_obstacle, 
+                                    sigma_obs, obs_ddls, obs_fractured, "wood"
+                                )
                             if cracked_o:
+                                for p_idx in split_parents_o:
+                                    initial_obstacle_nodes.append(initial_obstacle_nodes[p_idx].copy())
                                 num_obs_nodes = len(u_obs) // 2
 
                         
@@ -435,21 +478,16 @@ async def simulation_stream(websocket: WebSocket):
                     # Le temps visuel calculé est transmis au frontend
                     current_time = frame_id * temps_visuel_par_frame
 
-                    # 9. Calcul des contraintes réelles (Heat Map physique)
-                    # La contrainte est désormais proportionnelle aux forces internes générées dans le matériau
-                    stresses = []
-                    for el in blade_elements_data:
-                        ddls = el['ddls']
-                        u_e = u_blade[ddls]
-                        
-                        epsilon = np.dot(el['B'], u_e)
-                        sigma = np.dot(el['D'], epsilon) # [sigma_x, sigma_y, tau_xy]
-                        
-                        # Calcul strict de Von Mises
-                        sig_x, sig_y, tau_xy = sigma[0], sigma[1], sigma[2]
+                    # 9. Calcul vectorisé de Von Mises (Heat Map)
+                    if M_blade is not None:
+                        sig_x = sigma_blade[:, 0]
+                        sig_y = sigma_blade[:, 1]
+                        tau_xy = sigma_blade[:, 2]
+                        # Calcul global de Von Mises en une seule passe
                         von_mises = np.sqrt(sig_x**2 + sig_y**2 - sig_x*sig_y + 3 * tau_xy**2)
-                        
-                        stresses.append(float(von_mises))
+                        stresses = von_mises.tolist()
+                    else:
+                        stresses = []
 
                     # --- ÉCRITURE DES DONNÉES DE DIAGNOSTIC ---
                     max_u = float(np.max(np.abs(u_blade)))
@@ -485,12 +523,12 @@ async def simulation_stream(websocket: WebSocket):
                     await websocket.send_text(json.dumps(frame_payload))
                     await asyncio.sleep(0.05)
                 
-            logger.info("[Solveur] Simulation terminée. En attente d'une nouvelle requête...\n")
+            print("[Solveur] Simulation terminée. En attente d'une nouvelle requête...\n")
 
     except WebSocketDisconnect:
         # L'utilisateur a fermé la page ou rechargé le navigateur
-        logger.info("Déconnexion propre du client WebSocket.")
+        print("Déconnexion propre du client WebSocket.")
     except Exception as e:
-        logger.info(f"Erreur inattendue du solveur : {e}")
+        print(f"Erreur inattendue du solveur : {e}")
 
 
