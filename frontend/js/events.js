@@ -1,8 +1,19 @@
 import { appState, blade, obstacle, ruler, historyManager, overwriteState, simulationState, simulationParams } from './state.js';
-import { canvas, ctx, redraw } from './render.js';
+import { canvas, ctx, redraw} from './render.js';
 import { runSimulation, connectSimulationStream, updateTimelineUI } from './network.js';
 import { distance, isPointInTriangle, pointToSegmentDistance } from './mathUtils.js';
 import { findClosestPoint, findClosestInternalEdge, rebuildRegionsFromEdges, generateMesh, splitRegion, updateTargetMass } from './geometry.js';
+
+// --- État de la Caméra ---
+export const camera = {
+    x: 0,       // Décalage horizontal (Pan)
+    y: 0,       // Décalage vertical (Pan)
+    scale: 1.0  // Niveau de zoom
+};
+
+// --- État de l'interaction ---
+let isPanning = false;
+let startPan = { x: 0, y: 0 };
 
 function updateHistoryUI() {
   const btnUndo = document.getElementById("btn-undo"), btnRedo = document.getElementById("btn-redo");
@@ -254,8 +265,14 @@ export function initEvents() {
 
   canvas.addEventListener("mousedown", e => {
     const rect = canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
+    
+    // 1. Coordonnées brutes de l'écran (en pixels)
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+
+    // 2. Projection dans l'espace "Monde" (Simulation)
+    const mx = (screenX - camera.x) / camera.scale;
+    const my = (screenY - camera.y) / camera.scale;
 
     if (ruler.visible && ruler.hoveredPart) {
       ruler.isDragging = true;
@@ -283,10 +300,9 @@ export function initEvents() {
         return; 
       }
     }
-
     saveState();
-
-    if (appState.mode === "draw_blade" || appState.mode === "draw_obstacle") {
+    if (e.button === 0) {
+      if (appState.mode === "draw_blade" || appState.mode === "draw_obstacle" ) {
       const target = appState.mode === "draw_blade" ? blade : obstacle;
       if (!target.isClosed) {
         if (target.contour.length > 2 && distance(mx, my, target.contour[0].x, target.contour[0].y) < 15) {
@@ -297,110 +313,120 @@ export function initEvents() {
           redraw();
         }
       }
-    } 
-    else if (appState.mode === "move") {
-      const closest = findClosestPoint(mx, my);
-      if (closest) {
-        appState.draggedPoint = closest.point;
-        appState.activeTarget = closest.target;
-      }
-    } 
-    else if (appState.mode === "erase") {
-      const closestEdge = findClosestInternalEdge(mx, my, 12);
-      if (closestEdge) {
-        closestEdge.target.internalEdges.splice(closestEdge.index, 1);
-        rebuildRegionsFromEdges(closestEdge.target);
-        generateMesh(closestEdge.target);
-        redraw();
-        return;
-      }
-
-      const closest = findClosestPoint(mx, my, 15);
-      if (closest) {
-        const target = closest.target;
-        const removeIdx = closest.index;
-        target.contour.splice(removeIdx, 1);
-
-        if (target.contour.length < 3) {
-          target.isClosed = false;
-          target.regions = [];
-          target.internalEdges = [];
-          target.mesh.vertices = [];
-          target.mesh.elements = [];
-        } else if (target.isClosed) {
-          if (target.internalEdges) {
-            target.internalEdges = target.internalEdges
-              .filter(e => e.p1 !== removeIdx && e.p2 !== removeIdx)
-              .map(e => ({
-                p1: e.p1 > removeIdx ? e.p1 - 1 : e.p1,
-                p2: e.p2 > removeIdx ? e.p2 - 1 : e.p2
-              }));
-          }
-          rebuildRegionsFromEdges(target);
-          generateMesh(target);
+      } 
+      else if (appState.mode === "move") {
+        const closest = findClosestPoint(mx, my);
+        if (closest) {
+          appState.draggedPoint = closest.point;
+          appState.activeTarget = closest.target;
         }
-        redraw();
-      }
-    }
-    else if (appState.mode === "add_segment") {
-      const closest = findClosestPoint(mx, my, 15);
-      if (closest && closest.target.isClosed) {
-        if (!appState.segmentStart) {
-          appState.segmentStart = closest;
+      } 
+      else if (appState.mode === "erase") {
+        const closestEdge = findClosestInternalEdge(mx, my, 12);
+        if (closestEdge) {
+          closestEdge.target.internalEdges.splice(closestEdge.index, 1);
+          rebuildRegionsFromEdges(closestEdge.target);
+          generateMesh(closestEdge.target);
           redraw();
-        } else {
-          if (appState.segmentStart.target === closest.target) {
-            splitRegion(closest.target, appState.segmentStart.index, closest.index);
+          return;
+        }
+
+        const closest = findClosestPoint(mx, my, 15);
+        if (closest) {
+          const target = closest.target;
+          const removeIdx = closest.index;
+          target.contour.splice(removeIdx, 1);
+
+          if (target.contour.length < 3) {
+            target.isClosed = false;
+            target.regions = [];
+            target.internalEdges = [];
+            target.mesh.vertices = [];
+            target.mesh.elements = [];
+          } else if (target.isClosed) {
+            if (target.internalEdges) {
+              target.internalEdges = target.internalEdges
+                .filter(e => e.p1 !== removeIdx && e.p2 !== removeIdx)
+                .map(e => ({
+                  p1: e.p1 > removeIdx ? e.p1 - 1 : e.p1,
+                  p2: e.p2 > removeIdx ? e.p2 - 1 : e.p2
+                }));
+            }
+            rebuildRegionsFromEdges(target);
+            generateMesh(target);
           }
+          redraw();
+        }
+      }
+      else if (appState.mode === "add_segment") {
+        const closest = findClosestPoint(mx, my, 15);
+        if (closest && closest.target.isClosed) {
+          if (!appState.segmentStart) {
+            appState.segmentStart = closest;
+            redraw();
+          } else {
+            if (appState.segmentStart.target === closest.target) {
+              splitRegion(closest.target, appState.segmentStart.index, closest.index);
+            }
+            appState.segmentStart = null; 
+            redraw();
+          }
+        } else {
           appState.segmentStart = null; 
           redraw();
         }
-      } else {
-        appState.segmentStart = null; 
-        redraw();
       }
-    }
-    else if (appState.mode === "fixation") {
-      if (blade.isClosed || obstacle.isClosed) {
-        appState.fixationStart = { x: mx, y: my };
-      }
-    }
-    else if (appState.mode === "paint") {
-      paintTriangleAt(mx, my);
-    }
-    else if (appState.mode === "insert") {
-      for (let target of [blade, obstacle]) {
-        if (!target.isClosed) continue;
-        let minDist = 15;
-        let bestIndex = -1;
-        
-        for (let i = 0; i < target.contour.length; i++) {
-          let p1 = target.contour[i];
-          let p2 = target.contour[(i + 1) % target.contour.length];
-          let d = pointToSegmentDistance(mx, my, p1.x, p1.y, p2.x, p2.y);
-          if (d < minDist) { minDist = d; bestIndex = i; }
+      else if (appState.mode === "fixation") {
+        if (blade.isClosed || obstacle.isClosed) {
+          appState.fixationStart = { x: mx, y: my };
         }
-        
-        if (bestIndex !== -1) {
-          target.contour.splice(bestIndex + 1, 0, { x: mx, y: my });
-          target.regions = []; 
-          target.internalEdges = [];
-          generateMesh(target);
+      }
+      else if (appState.mode === "paint") {
+        paintTriangleAt(mx, my);
+      }
+      else if (appState.mode === "insert") {
+        for (let target of [blade, obstacle]) {
+          if (!target.isClosed) continue;
+          let minDist = 15;
+          let bestIndex = -1;
+          
+          for (let i = 0; i < target.contour.length; i++) {
+            let p1 = target.contour[i];
+            let p2 = target.contour[(i + 1) % target.contour.length];
+            let d = pointToSegmentDistance(mx, my, p1.x, p1.y, p2.x, p2.y);
+            if (d < minDist) { minDist = d; bestIndex = i; }
+          }
+          
+          if (bestIndex !== -1) {
+            target.contour.splice(bestIndex + 1, 0, { x: mx, y: my });
+            target.regions = []; 
+            target.internalEdges = [];
+            generateMesh(target);
+            redraw();
+            break; 
+          }
+        }
+      }
+      else if (appState.mode === "thickness") {
+        const closest = findClosestPoint(mx, my, 15);
+        if (closest) {
+          closest.point.t = appState.currentThickness;
+          if (closest.target.isClosed) {
+            generateMesh(closest.target);
+          }
           redraw();
-          break; 
         }
       }
     }
-    else if (appState.mode === "thickness") {
-      const closest = findClosestPoint(mx, my, 15);
-      if (closest) {
-        closest.point.t = appState.currentThickness;
-        if (closest.target.isClosed) {
-          generateMesh(closest.target);
-        }
-        redraw();
-      }
+    // --- PANNING (Début : Clic molette) ---
+    else if (e.button === 1) { // 1 = Clic de la molette (Middle click)
+        e.preventDefault();
+        isPanning = true;
+        startPan.x = e.clientX - camera.x;
+        startPan.y = e.clientY - camera.y;
+        canvas.style.cursor = 'grabbing';
     }
+
   });
 
   canvas.addEventListener("mousemove", e => {
@@ -471,6 +497,16 @@ export function initEvents() {
       ctx.fillRect(rectX, rectY, rectW, rectH);
       ctx.strokeRect(rectX, rectY, rectW, rectH);
     }
+
+    //PANNING (Déplacement : Mouvement souris) ---
+    if (!isPanning) return;
+      // Mise à jour de la position de la caméra
+      camera.x = e.clientX - startPan.x;
+      camera.y = e.clientY - startPan.y;
+
+      // Forcer le rafraîchissement
+      redraw();
+
   });
 
   window.addEventListener("mouseup", (e) => {
@@ -482,7 +518,7 @@ export function initEvents() {
     console.info("[Update Mass] Erreur lors du calcul de masse :", e);
     }
 
-    
+
     const rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
@@ -518,5 +554,38 @@ export function initEvents() {
     appState.draggingVelocity = false;
     appState.draggedPoint = null;
     appState.activeTarget = null;
+
+    
+    // --- PANNING (Fin : Relâchement du clic molette) ---
+    if (e.button === 1 && isPanning) {
+        isPanning = false;
+        canvas.style.cursor = 'default';
+    }
+
   });
-}
+
+  // --- 1. ZOOM (Molette de la souris) ---
+  canvas.addEventListener('wheel', (e) => {
+      e.preventDefault(); // Empêche le défilement de la page web
+
+      const zoomIntensity = 0.1;
+      const wheelDirection = e.deltaY > 0 ? -1 : 1;
+      const zoomFactor = 1 + (wheelDirection * zoomIntensity);
+
+      // Coordonnées de la souris relatives au canvas
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      // Ajustement des décalages pour zoomer vers le curseur
+      camera.x = mouseX - (mouseX - camera.x) * zoomFactor;
+      camera.y = mouseY - (mouseY - camera.y) * zoomFactor;
+      
+      // Application du zoom
+      camera.scale *= zoomFactor;
+
+      // Forcer le rafraîchissement de l'image (appelez votre fonction de dessin principale)
+      redraw()
+  });
+
+};

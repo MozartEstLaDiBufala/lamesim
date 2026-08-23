@@ -1,18 +1,24 @@
 # Configuration du Solveur Physique
 solver:
   time_step_physique: 1.0e-6   # Pas physique ultra-fin pour la stabilité (1µs)
-  penalty_stiffness: 1.0e+5      # Force de pénalité de contact
-  damping_factor: 15.0          # Amortissement global (dissipation d'énergie)
+  penalty_stiffness: 1.0e+7      # Force de pénalité de contact
+  damping_factor: 2000.0          # Amortissement global (dissipation d'énergie)
+  contact_damping: 2000.0
 
 # Base de données des propriétés physiques des matériaux
 materials:
   steel:
-    E: 5.0e+9    # Module de Young réduit (en Pascals)
-    nu: 0.3      # Coefficient de Poisson
-    rho: 7850    # Densité (kg/m³)
-    sigma_yield: 2.5e+8   # Limite élastique (Pascals)
-  wood:
-    E: 5.0e+4    # Module de Young du bois
-    nu: 0.4      # Coefficient de Poisson
-    rho: 600     # Densité (kg/m³)
+    E: 20e+9             #[defaut=205 GPa = 205*1e+9Pa] Module de Young,La Rigidité. C'est la force qu'il faut pour commencer à déformer le matériau.
+    nu: 0.28              #[defaut=0.28] Coefficient de Poisson, mesure le changement de largeur d'un matériau quand on tire ou pousse dessus dans le sens de la longueur.
+    rho: 7850             #[defaut=7850]  Densité (kg/m³)
+    sigma_yield: 18e+3   #[defaut=180 MPa] Limite élastique (Pascals),la Solidité. C'est le point où le matériau casse ou se plie définitivement (le plafond de la courbe).
+    limit_strain : 5      #L'acier peut s'étirer plastiquement jusqu'à 500% avant rupture
+
+  wood: #chêne
+    E: 1.2e+9             #[defaut=12 Gpa = 12*1e+9 Pa]     
+    nu: 0.26              #[defaut=0.26] Coefficient de Poisson, orthotrope ramené a isotrope (une direction)
+    rho: 725              #[defaut=725] Densité (kg/m³)
     sigma_uts: 4.0e+7     # Résistance ultime en traction (Pascals)
+    limit_strain : 0.15   # Si le bois s'étire de plus de 15% (0.15), ses fibres se déchirent.
+
+

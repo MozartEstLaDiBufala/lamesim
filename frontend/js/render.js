@@ -1,8 +1,11 @@
 import { blade, obstacle, ruler, appState, materialsDB, simulationState } from './state.js';
 import { isPointInRect } from './mathUtils.js';
+import { camera } from './events.js';
 
 export const canvas = document.getElementById("canvas");
 export const ctx = canvas.getContext("2d");
+
+
 
 function getStressColor(stress, maxStress, baseColor) {
   if (!maxStress || stress <= 0 || (stress / maxStress) < 0.02) return baseColor;
@@ -524,6 +527,14 @@ export function drawRuler(ctx) {
 
 export function redraw() {
   
+  // 1. Réinitialiser la matrice de transformation pour effacer correctement l'écran entier
+  ctx.setTransform(1, 0, 0, 1, 0, 0); 
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // 2. Appliquer les transformations de la caméra (Translation puis Scale)
+  ctx.translate(camera.x, camera.y);
+  ctx.scale(camera.scale, camera.scale);
+
   //Recalcul du centre de gravité de la lame
   if (blade.contour.length > 0 && blade.kinematics && blade.kinematics.velocity && appState.mode !== "simulation") {
     const vel = blade.kinematics.velocity;
@@ -547,8 +558,6 @@ export function redraw() {
     vel.endX = centerX + vx;
     vel.endY = centerY + vy;
   }
-
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
   
   drawEntity(blade);
   drawEntity(obstacle);

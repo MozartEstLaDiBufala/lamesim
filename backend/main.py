@@ -72,11 +72,13 @@ SOLVER_CONF = settings.get("solver", {})
 TIME_STEP_PHYSIQUE = float(SOLVER_CONF.get("time_step_physique"))
 PENALTY_STIFFNESS = float(SOLVER_CONF.get("penalty_stiffness"))
 DAMPING_FACTOR = float(SOLVER_CONF.get("damping_factor"))
+CONTACT_DAMPING = float(SOLVER_CONF.get("contact_damping"))
 
 print("\n=== VERIFICATION DES VARIABLES GLOBALES ===")
 print(f"TIME_STEP_PHYSIQUE : {TIME_STEP_PHYSIQUE} (Type: {type(TIME_STEP_PHYSIQUE)})")
 print(f"PENALTY_STIFFNESS  : {PENALTY_STIFFNESS} (Type: {type(PENALTY_STIFFNESS)})")
 print(f"DAMPING_FACTOR     : {DAMPING_FACTOR} (Type: {type(DAMPING_FACTOR)})")
+print(f"CONTACT_DAMPING     : {CONTACT_DAMPING} (Type: {type(CONTACT_DAMPING)})")
 print("===========================================\n")
 
 # --- 2. Le point de terminaison asynchrone (WebSocket) ---
@@ -207,7 +209,6 @@ async def simulation_stream(websocket: WebSocket):
                 blade_B = np.array([el['B'] for el in blade_elements_data])
                 blade_D = np.array([el['D'] for el in blade_elements_data])
                 blade_vol = np.array([el['A'] * el['t'] for el in blade_elements_data])
-                blade_fractured = np.zeros(len(blade_elements_data), dtype=bool)
             else:
                 blade_ddls, blade_B, blade_D, blade_vol = None, None, None, None
 
@@ -217,7 +218,6 @@ async def simulation_stream(websocket: WebSocket):
                 obs_B = np.array([el['B'] for el in obstacle_elements_data])
                 obs_D = np.array([el['D'] for el in obstacle_elements_data])
                 obs_vol = np.array([el['A'] * el['t'] for el in obstacle_elements_data])
-                obs_fractured = np.zeros(len(obstacle_elements_data), dtype=bool)
             else:
                 obs_ddls, obs_B, obs_D, obs_vol = None, None, None, None
             # ---------------------------------------------------
@@ -265,13 +265,7 @@ async def simulation_stream(websocket: WebSocket):
                 num_current_blade_nodes = len(u_blade) // 2
                 
                 for i in range(num_current_blade_nodes):
-
-                    if i < len(initial_blade_nodes):
-                        pt = initial_blade_nodes[i]
-                    else:
-                        pt = initial_blade_nodes[0]
-
-                    #pt = initial_blade_nodes[i]
+                    pt = initial_blade_nodes[i]
                     current_blade_nodes.append({
                         "x": float(pt["x"] + u_blade[2*i] / scale_factor),
                         "y": float(pt["y"] + u_blade[2*i+1] / scale_factor)
@@ -282,14 +276,7 @@ async def simulation_stream(websocket: WebSocket):
                 num_current_obs_nodes = len(u_obs) // 2
                 
                 for i in range(num_current_obs_nodes):
-
-                    if i < len(initial_obstacle_nodes):
-                        pt = initial_obstacle_nodes[i]
-                    else:
-                        pt = initial_obstacle_nodes[0]
-
-                    #pt = initial_obstacle_nodes[i]
-                    
+                    pt = initial_obstacle_nodes[i]
                     current_obstacle_nodes.append({
                         "x": float(pt["x"] + u_obs[2*i] / scale_factor),
                         "y": float(pt["y"] + u_obs[2*i+1] / scale_factor)
@@ -371,8 +358,33 @@ async def simulation_stream(websocket: WebSocket):
                                 # On doit convertir la pénétration en MÈTRES pour le calcul de la force
                                 delta_m = delta * scale_factor
                                 
-                                force_x = PENALTY_STIFFNESS * delta_m * nx
-                                force_y = PENALTY_STIFFNESS * delta_m * ny
+                                # 1. Force de ressort (Pénalité élastique)
+                                force_x_spring = PENALTY_STIFFNESS * delta_m * nx
+                                force_y_spring = PENALTY_STIFFNESS * delta_m * ny
+
+                                # 2. Force d'amortissement (Choc inélastique)
+                                # Vitesse du nœud de la lame
+                                v_bx = v_blade[2*idx_node]
+                                v_by = v_blade[2*idx_node + 1]
+                                
+                                # Vitesse moyenne du triangle de l'obstacle au point d'impact
+                                v_ox = (v_obs[2*n1] + v_obs[2*n2] + v_obs[2*n3]) / 3.0
+                                v_oy = (v_obs[2*n1+1] + v_obs[2*n2+1] + v_obs[2*n3+1]) / 3.0
+                                
+                                # Vitesse relative
+                                v_rel_x = v_bx - v_ox
+                                v_rel_y = v_by - v_oy
+                                
+                                # Projection de la vitesse relative sur la normale
+                                v_rel_n = v_rel_x * nx + v_rel_y * ny
+                                
+                                # Calcul de l'amortissement (s'oppose à la vitesse de pénétration et de rebond)
+                                force_x_damp = -CONTACT_DAMPING * v_rel_n * nx
+                                force_y_damp = -CONTACT_DAMPING * v_rel_n * ny
+                                
+                                # 3. Force totale appliquée
+                                force_x = force_x_spring + force_x_damp
+                                force_y = force_y_spring + force_y_damp
 
                                 F_ext[2*idx_node] += force_x
                                 F_ext[2*idx_node + 1] += force_y
@@ -446,30 +458,38 @@ async def simulation_stream(websocket: WebSocket):
                         t_forces += (time.perf_counter() - start_time)
                         start_time = time.perf_counter()
 
-                        # --- 8. MÉCANIQUE DE LA RUPTURE (Fracture Mechanics) ---
-                        if M_blade is not None:
-                            blade_elements_data, u_blade, v_blade, a_blade, M_blade, blade_ddls, blade_fractured, cracked_b, split_parents_b = \
-                                FractureManager.process_fracture_vectorized(
-                                    blade_elements_data, u_blade, v_blade, a_blade, M_blade, 
-                                    sigma_blade, blade_ddls, blade_fractured, "steel"
-                                )
-                            if cracked_b:
-                                # Le nouveau nœud hérite des coordonnées absolues de son parent
-                                for p_idx in split_parents_b:
-                                    initial_blade_nodes.append(initial_blade_nodes[p_idx].copy())
-                                num_nodes = len(u_blade) // 2
-                                
-                        if M_obstacle is not None:
-                            obstacle_elements_data, u_obs, v_obs, a_obs, M_obstacle, obs_ddls, obs_fractured, cracked_o, split_parents_o = \
-                                FractureManager.process_fracture_vectorized(
-                                    obstacle_elements_data, u_obs, v_obs, a_obs, M_obstacle, 
-                                    sigma_obs, obs_ddls, obs_fractured, "wood"
-                                )
-                            if cracked_o:
-                                for p_idx in split_parents_o:
-                                    initial_obstacle_nodes.append(initial_obstacle_nodes[p_idx].copy())
-                                num_obs_nodes = len(u_obs) // 2
+                        # --- 8. MÉCANIQUE DE L'ÉROSION (Destruction de la matière) ---
+                        
+                        # Classe minimaliste pour la mise à jour du détecteur
+                        class SurvivingElement:
+                            def __init__(self, nodes):
+                                self.nodes = nodes
 
+                        # Érosion de la Lame 
+                        if M_blade is not None and len(blade_elements_data) > 0:
+                            blade_elements_data, blade_ddls, blade_B, blade_D, blade_vol, eroded_b = \
+                                FractureManager.process_erosion_vectorized(
+                                    blade_elements_data, sigma_blade, blade_ddls, blade_B, blade_D, blade_vol, "steel"
+                                )
+                            
+                            # Informer le détecteur de la casse de la lame
+                            if eroded_b and detector is not None:
+                                detector.blade_elements = [SurvivingElement(el['nodes']) for el in blade_elements_data]
+                                
+                        # Érosion de l'Obstacle 
+                        if M_obstacle is not None and len(obstacle_elements_data) > 0:
+                            obstacle_elements_data, obs_ddls, obs_B, obs_D, obs_vol, eroded_o = \
+                                FractureManager.process_erosion_vectorized(
+                                    obstacle_elements_data, sigma_obs, obs_ddls, obs_B, obs_D, obs_vol, "wood"
+                                )
+                                
+                            # Informer le détecteur de la casse du bois
+                            if eroded_o and detector is not None:
+                                detector.obstacle_elements = [SurvivingElement(el['nodes']) for el in obstacle_elements_data]
+
+                        if (eroded_b or eroded_o) and detector is not None:
+                            # Cela forcera le détecteur à recalculer ses boîtes englobantes sur la nouvelle géométrie trouée.
+                            detector = CollisionDetector(initial_obstacle_nodes, obstacle_elements)
                         
                         t_fracture += (time.perf_counter() - start_time)
 
