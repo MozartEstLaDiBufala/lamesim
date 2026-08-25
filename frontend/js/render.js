@@ -151,8 +151,10 @@ function drawEntity(target) {
       if (v2.t === undefined) v2.t = 1.0;
 
       // Le matériau est conservé du maillage initial statique (simplification temporelle)
-      let matName = (element.material !== undefined) ? element.material : 
-                    (target.mesh.elements[0] ? target.mesh.elements[0].material : "steel");
+      // On tente de récupérer le matériau du maillage d'origine au même index
+      let originalMat = (target.mesh.elements[triIndex] !== undefined) ? target.mesh.elements[triIndex].material : "steel";
+      let matName = (element.material !== undefined) ? element.material : originalMat;
+
       let baseColor = (typeof materialsDB !== 'undefined' && materialsDB[matName]) ? 
                        materialsDB[matName].color : "rgba(180, 180, 180, 0.7)";
 

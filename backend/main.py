@@ -74,12 +74,12 @@ PENALTY_STIFFNESS = float(SOLVER_CONF.get("penalty_stiffness"))
 DAMPING_FACTOR = float(SOLVER_CONF.get("damping_factor"))
 CONTACT_DAMPING = float(SOLVER_CONF.get("contact_damping"))
 
-print("\n=== VERIFICATION DES VARIABLES GLOBALES ===")
-print(f"TIME_STEP_PHYSIQUE : {TIME_STEP_PHYSIQUE} (Type: {type(TIME_STEP_PHYSIQUE)})")
-print(f"PENALTY_STIFFNESS  : {PENALTY_STIFFNESS} (Type: {type(PENALTY_STIFFNESS)})")
-print(f"DAMPING_FACTOR     : {DAMPING_FACTOR} (Type: {type(DAMPING_FACTOR)})")
-print(f"CONTACT_DAMPING     : {CONTACT_DAMPING} (Type: {type(CONTACT_DAMPING)})")
-print("===========================================\n")
+#print("\n=== VERIFICATION DES VARIABLES GLOBALES ===")
+#print(f"TIME_STEP_PHYSIQUE : {TIME_STEP_PHYSIQUE} (Type: {type(TIME_STEP_PHYSIQUE)})")
+#print(f"PENALTY_STIFFNESS  : {PENALTY_STIFFNESS} (Type: {type(PENALTY_STIFFNESS)})")
+#print(f"DAMPING_FACTOR     : {DAMPING_FACTOR} (Type: {type(DAMPING_FACTOR)})")
+#print(f"CONTACT_DAMPING     : {CONTACT_DAMPING} (Type: {type(CONTACT_DAMPING)})")
+#print("===========================================\n")
 
 # --- 2. Le point de terminaison asynchrone (WebSocket) ---
 @app.websocket("/stream")
@@ -87,7 +87,7 @@ async def simulation_stream(websocket: WebSocket):
 
     # A. Le serveur accepte la connexion et garde la porte ouverte
     await websocket.accept()
-    print("[DEBUG WEBSOCKET] Client connecté.")
+    ##print("[DEBUG WEBSOCKET] Client connecté.")
     
     try:
         # B. La boucle infinie : le serveur attend indéfiniment de nouvelles requêtes
@@ -99,11 +99,11 @@ async def simulation_stream(websocket: WebSocket):
             try:
                 # C'est ici que Python compare votre JSON avec la classe Pydantic
                 payload = SimulationPayload(**raw_data)
-                print("[DEBUG WEBSOCKET] Payload validé.")
+                ##print("[DEBUG WEBSOCKET] Payload validé.")
 
             except ValidationError as e:
                 # Si les structures diffèrent, le code entre ici.
-                print("\n=== ÉCHEC DE VALIDATION DU PAYLOAD ===")
+                ##print("\n=== ÉCHEC DE VALIDATION DU PAYLOAD ===")
                 
                 # Affichage structuré des erreurs exactes
                 for error in e.errors():
@@ -111,10 +111,10 @@ async def simulation_stream(websocket: WebSocket):
                     chemin = " -> ".join([str(loc) for loc in error["loc"]])
                     message = error["msg"]
                     type_erreur = error["type"]
-                    print(f"Erreur sur : [{chemin}]")
-                    print(f"Raison   : {message} (Type: {type_erreur})\n")
+                    ##print(f"Erreur sur : [{chemin}]")
+                    ##print(f"Raison   : {message} (Type: {type_erreur})\n")
                 
-                print("=======================================\n")
+                ##print("=======================================\n")
                 
                 # Optionnel : Renvoyer l'erreur au frontend avant de fermer
                 await websocket.send_json({"error": "Payload invalide", "details": e.errors()})
@@ -128,7 +128,7 @@ async def simulation_stream(websocket: WebSocket):
             impact_speed = payload.blade.kinematics.impactSpeed
             
             if vel is None:
-                print("[Attention] Aucune flèche reçue. Chute verticale par défaut.")
+                ##print("[Attention] Aucune flèche reçue. Chute verticale par défaut.")
                 dir_x = 0.0
                 dir_y = 1.0 # Le vecteur pointe vers le bas
             else:
@@ -143,7 +143,7 @@ async def simulation_stream(websocket: WebSocket):
 
             # --- PRÉPARATION DE LA DÉTECTION DE COLLISION ---
             # --- EXTRACTION DES PARAMÈTRES VISUELS (Depuis le frontend) ---
-            print(f"PRÉPARATION DE LA DÉTECTION DE COLLISION")
+            ##print(f"PRÉPARATION DE LA DÉTECTION DE COLLISION")
             if payload.parameters:
                 # "simulate_time" correspond à "Durée réelle à simuler"
                 total_simulated_time = payload.parameters.get("simulate_time", 0.05)
@@ -154,15 +154,15 @@ async def simulation_stream(websocket: WebSocket):
                 num_steps = 50
 
             # --- 1. CONFIGURATION DU DÉCOUPLAGE TEMPOREL ---
-            print(f"1. CONFIGURATION DU DÉCOUPLAGE TEMPOREL")
+            #print(f"1. CONFIGURATION DU DÉCOUPLAGE TEMPOREL")
             # Calcul du temps qui s'écoule entre deux images affichées à l'écran
             temps_visuel_par_frame = total_simulated_time / num_steps 
             
             # Nombre de fois où le moteur physique doit tourner pour générer une frame
             sub_steps = int(temps_visuel_par_frame / TIME_STEP_PHYSIQUE) 
             
-            print(f"[Solveur] Simulation: {total_simulated_time}s | Frames: {num_steps}")
-            print(f"[Solveur] Découplage activé : {sub_steps} calculs physiques par image visuelle.")
+            #print(f"[Solveur] Simulation: {total_simulated_time}s | Frames: {num_steps}")
+            #print(f"[Solveur] Découplage activé : {sub_steps} calculs physiques par image visuelle.")
 
             # 1. On récupère les éléments (triangles) spécifiques à l'obstacle
             obstacle_elements = payload.obstacle.mesh.elements if payload.obstacle else []
@@ -176,32 +176,38 @@ async def simulation_stream(websocket: WebSocket):
             else:
                 detector = None
 
-            print(f"[Solveur] Calcul lancé. Vitesse d'impact: {impact_speed} m/s")
+            #print(f"[Solveur] Calcul lancé. Vitesse d'impact: {impact_speed} m/s")
 
             # --- ASSEMBLAGE DES MATRICES GLOBALES FEA ---
-            print("[Solveur] Assemblage des matrices FEA en cours...")
-            
+            #print("[Solveur] Assemblage des matrices FEA en cours...")
+        
             # 1. Conversion des nœuds Pydantic en dictionnaires pour notre assembleur
+            #print("1. Conversion des nœuds Pydantic en dictionnaires pour notre assembleur")
             initial_blade_nodes = [{"x": pt.x, "y": pt.y, "t": getattr(pt, 't', 1.0)} for pt in blade_vertices]
             initial_obstacle_nodes = [{"x": pt.x, "y": pt.y, "t": getattr(pt, 't', 1.0)} for pt in obstacle_vertices]
             scale_factor = payload.scale_factor # On récupère l'échelle du JSON
             
             # 2. Construction des propriétés et M pour la Lame
+            #print("2. Construction des propriétés et M pour la Lame")
+            ##print(f"initial_blade_nodes :{initial_blade_nodes}")
+            ##print(f"elements :{elements}")
+            ##print(f"scale_factor : {scale_factor}")
             if initial_blade_nodes and elements:
                 blade_elements_data, M_blade = SystemAssembler.precompute_system(initial_blade_nodes, elements, scale_factor)
-                print(f"[Solveur] Lame pré-calculée : {len(blade_elements_data)} éléments.")
+                #print(f"[Solveur] Lame pré-calculée : {len(blade_elements_data)} éléments.")
             else:
                 blade_elements_data, M_blade = [], None
                 
             # 3. Construction des propriétés et M pour l'Obstacle
+            #print("3. Construction des propriétés et M pour l'Obstacle")
             if initial_obstacle_nodes and obstacle_elements:
                 obstacle_elements_data, M_obstacle = SystemAssembler.precompute_system(initial_obstacle_nodes, obstacle_elements, scale_factor)
-                print(f"[Solveur] Obstacle pré-calculé : {len(obstacle_elements_data)} éléments.")
+                #print(f"[Solveur] Obstacle pré-calculé : {len(obstacle_elements_data)} éléments.")
             else:
                 obstacle_elements_data, M_obstacle = [], None
 
             # --- CONVERSION EN TENSEURS 3D (VECTORISATION) ---
-            print("[Solveur] Vectorisation des matrices en cours...")
+            #print("[Solveur] Vectorisation des matrices en cours...")
             
             # Lame
             if M_blade is not None:
@@ -224,7 +230,7 @@ async def simulation_stream(websocket: WebSocket):
 
 
             # --- INITIALISATION DE LA CINÉMATIQUE (VECTEURS D'ÉTAT) ---
-            print("[Solveur] Initialisation des vecteurs cinématiques...")
+            #print("[Solveur] Initialisation des vecteurs cinématiques...")
             
             # --- INITIALISATION DE LA CINÉMATIQUE DE LA LAME ---
             num_nodes = len(initial_blade_nodes)
@@ -256,11 +262,12 @@ async def simulation_stream(websocket: WebSocket):
             stresses = [0.0] * len(elements)
 
             # --- LA DOUBLE BOUCLE ---
-            print(f"LA DOUBLE BOUCLE")
+            #print(f"LA DOUBLE BOUCLE")
             # Boucle externe : Gère ce que l'utilisateur voit
             for frame_id in range(num_steps + 1):
 
                 # 1. Projection dynamique des nœuds (Lame)
+                #print("1. Projection dynamique des nœuds (Lame)")
                 current_blade_nodes = []
                 num_current_blade_nodes = len(u_blade) // 2
                 
@@ -272,6 +279,7 @@ async def simulation_stream(websocket: WebSocket):
                     })
                 
                 # 2. Projection dynamique des nœuds (Obstacle)
+                #print("2. Projection dynamique des nœuds (Obstacle)")
                 current_obstacle_nodes = []
                 num_current_obs_nodes = len(u_obs) // 2
                 
@@ -282,11 +290,14 @@ async def simulation_stream(websocket: WebSocket):
                         "y": float(pt["y"] + u_obs[2*i+1] / scale_factor)
                     })
 
-                # 3. Extraction de la connectivité dynamique (NOUVEAU)
-                current_blade_elements = [el['nodes'] for el in blade_elements_data] if M_blade is not None else []
-                current_obstacle_elements = [el['nodes'] for el in obstacle_elements_data] if M_obstacle is not None else []
+                # 3. Extraction de la connectivité dynamique
+                #print("3. Extraction de la connectivité dynamique")
+                current_blade_elements = [{"nodes": el['nodes'], "material": el.get("material", "steel")} for el in blade_elements_data] if M_blade is not None else []
+                print(current_blade_elements)
+                current_obstacle_elements = [{"nodes": el['nodes'], "material": el.get("material", "wood")} for el in obstacle_elements_data] if M_obstacle is not None else []
 
                 # 4. Construction et ENVOI du payload
+                #print("4. Construction et ENVOI du payload")
                 current_time = frame_id * temps_visuel_par_frame
                 
                 frame_payload = {
@@ -312,16 +323,19 @@ async def simulation_stream(websocket: WebSocket):
                 t_forces = 0.0
                 t_fracture = 0.0
 
-                # 3. Calcul de l'état physique SUIVANT (Ignoré si on est à la dernière frame)
+                # 5. Calcul de l'état physique SUIVANT (Ignoré si on est à la dernière frame)
+                #print("5. Calcul de l'état physique SUIVANT (Ignoré si on est à la dernière frame)")
                 if frame_id < num_steps:
 
                     # --- BOUCLE INTERNE : LA PHYSIQUE PURE ---
+                    #print(" --- BOUCLE INTERNE : LA PHYSIQUE PURE ---")
                     for _ in range(sub_steps):
 
                         #chrono
                         start_time = time.perf_counter()
 
                         # 1. Calcul des forces internes
+                        #print("1. Calcul des forces internes")
                         # Réinitialisation des vecteurs de force globale
                         F_int = np.zeros(2 * num_nodes)
                         F_int_obs = np.zeros(2 * num_obs_nodes)
@@ -330,6 +344,7 @@ async def simulation_stream(websocket: WebSocket):
                         F_ext_obs = np.zeros(2 * num_obs_nodes)
 
                         # 2. Projection pour la détection
+                        #print("2. Projection pour la détection")
                         current_blade_nodes = [
                             {"x": float(pt["x"] + u_blade[2*i] / scale_factor), 
                             "y": float(pt["y"] + u_blade[2*i+1] / scale_factor)} 
@@ -343,6 +358,7 @@ async def simulation_stream(websocket: WebSocket):
                         ]
 
                         # 3. Mécanique de contact
+                        #print("3. Mécanique de contact")
                         if detector:
                             contacts = detector.detect_penetrations(current_blade_nodes) 
                             
@@ -359,10 +375,12 @@ async def simulation_stream(websocket: WebSocket):
                                 delta_m = delta * scale_factor
                                 
                                 # 1. Force de ressort (Pénalité élastique)
+                                #print("1. Force de ressort (Pénalité élastique)")
                                 force_x_spring = PENALTY_STIFFNESS * delta_m * nx
                                 force_y_spring = PENALTY_STIFFNESS * delta_m * ny
 
                                 # 2. Force d'amortissement (Choc inélastique)
+                                #print("2. Force d'amortissement (Choc inélastique)")
                                 # Vitesse du nœud de la lame
                                 v_bx = v_blade[2*idx_node]
                                 v_by = v_blade[2*idx_node + 1]
@@ -383,6 +401,7 @@ async def simulation_stream(websocket: WebSocket):
                                 force_y_damp = -CONTACT_DAMPING * v_rel_n * ny
                                 
                                 # 3. Force totale appliquée
+                                #print("3. Force totale appliquée")
                                 force_x = force_x_spring + force_x_damp
                                 force_y = force_y_spring + force_y_damp
 
@@ -401,7 +420,9 @@ async def simulation_stream(websocket: WebSocket):
                         start_time = time.perf_counter()
 
                         # --- 4.1. Accumulation Vectorisée des Forces Internes ---
+                        #print("--- 4.1. Accumulation Vectorisée des Forces Internes ---")
                         # Pour la Lame
+                        #print("Pour la lame")
                         if M_blade is not None:
                             # 1. Extraction locale : shape (N, 6)
                             u_e_blade = u_blade[blade_ddls]
@@ -420,6 +441,7 @@ async def simulation_stream(websocket: WebSocket):
                             np.add.at(F_int, blade_ddls.ravel(), F_e_blade.ravel())
 
                         # Pour l'Obstacle
+                        #print("Pour l'Obstacle")
                         if M_obstacle is not None:
                             u_e_obs = u_obs[obs_ddls]
                             epsilon_obs = np.einsum('eij,ej->ei', obs_B, u_e_obs)
@@ -428,6 +450,7 @@ async def simulation_stream(websocket: WebSocket):
                             np.add.at(F_int_obs, obs_ddls.ravel(), F_e_obs.ravel())
 
                         # --- 4.2. Calcul des Accélérations (Loi de Newton) ---
+                        #print("--- 4.2. Calcul des Accélérations (Loi de Newton) ---")
                         if M_blade is not None:
                             for i in range(2 * num_nodes):
                                 m_eff = max(M_blade[i], 0.05) # Mass Scaling pour la stabilité
@@ -439,10 +462,12 @@ async def simulation_stream(websocket: WebSocket):
                                 a_obs[i] = (F_ext_obs[i] - F_int_obs[i] - DAMPING_FACTOR * v_obs[i] * m_eff_o) / m_eff_o
 
                         # 5. Intégration (Mise à jour des vitesses)
+                        #print(" 5. Intégration (Mise à jour des vitesses)")
                         v_blade += a_blade * TIME_STEP_PHYSIQUE
                         v_obs += a_obs * TIME_STEP_PHYSIQUE
                         
                         # 6. Verrouillage des conditions aux limites
+                        #print("6. Verrouillage des conditions aux limites")
                         for idx in fixed_blade_nodes:
                             if 2*idx + 1 < len(v_blade): # Sécurité de taille
                                 v_blade[2*idx] = 0.0 ; v_blade[2*idx + 1] = 0.0
@@ -451,6 +476,7 @@ async def simulation_stream(websocket: WebSocket):
                                 v_obs[2*idx] = 0.0 ; v_obs[2*idx + 1] = 0.0
 
                         # 7. Mise à jour des déplacements
+                        #print("7. Mise à jour des déplacements")
                         u_blade += v_blade * TIME_STEP_PHYSIQUE
                         u_obs += v_obs * TIME_STEP_PHYSIQUE
 
@@ -459,38 +485,50 @@ async def simulation_stream(websocket: WebSocket):
                         start_time = time.perf_counter()
 
                         # --- 8. MÉCANIQUE DE L'ÉROSION (Destruction de la matière) ---
-                        
+                        #print("--- 8. MÉCANIQUE DE L'ÉROSION (Destruction de la matière) ---")
+
                         # Classe minimaliste pour la mise à jour du détecteur
                         class SurvivingElement:
+                            """Classe mock optimisée pour le Duck Typing du détecteur."""
                             def __init__(self, nodes):
                                 self.nodes = nodes
 
-                        # Érosion de la Lame 
+                        eroded_b = False
+                        eroded_o = False
+
+                        # Érosion de la Lame
+                        #print("Érosion de la Lame") 
                         if M_blade is not None and len(blade_elements_data) > 0:
                             blade_elements_data, blade_ddls, blade_B, blade_D, blade_vol, eroded_b = \
                                 FractureManager.process_erosion_vectorized(
-                                    blade_elements_data, sigma_blade, blade_ddls, blade_B, blade_D, blade_vol, "steel"
+                                    blade_elements_data, sigma_blade, blade_ddls, blade_B, blade_D, blade_vol,
                                 )
-                            
-                            # Informer le détecteur de la casse de la lame
-                            if eroded_b and detector is not None:
-                                detector.blade_elements = [SurvivingElement(el['nodes']) for el in blade_elements_data]
                                 
                         # Érosion de l'Obstacle 
+                        #print("Érosion de l'Obstacle ")
                         if M_obstacle is not None and len(obstacle_elements_data) > 0:
                             obstacle_elements_data, obs_ddls, obs_B, obs_D, obs_vol, eroded_o = \
                                 FractureManager.process_erosion_vectorized(
-                                    obstacle_elements_data, sigma_obs, obs_ddls, obs_B, obs_D, obs_vol, "wood"
+                                    obstacle_elements_data, sigma_obs, obs_ddls, obs_B, obs_D, obs_vol,
                                 )
                                 
-                            # Informer le détecteur de la casse du bois
-                            if eroded_o and detector is not None:
-                                detector.obstacle_elements = [SurvivingElement(el['nodes']) for el in obstacle_elements_data]
-
                         if (eroded_b or eroded_o) and detector is not None:
                             # Cela forcera le détecteur à recalculer ses boîtes englobantes sur la nouvelle géométrie trouée.
                             detector = CollisionDetector(initial_obstacle_nodes, obstacle_elements)
-                        
+
+                        # Si la matière a été altérée, on reconstruit intégralement le détecteur avec les triangles qui ont survécu.
+                        if (eroded_b or eroded_o) and detector is not None:
+                            
+                            # Conversion des dictionnaires en objets pour le détecteur
+                            surviving_obs_objects = [SurvivingElement(el['nodes']) for el in obstacle_elements_data]
+                            surviving_blade_objects = [SurvivingElement(el['nodes']) for el in blade_elements_data]
+                            
+                            # On purge le cache et on recrée le détecteur sur la géométrie trouée
+                            detector = CollisionDetector(initial_obstacle_nodes, surviving_obs_objects)
+                            
+                            # On met à jour la lame dans le nouveau détecteur
+                            detector.blade_elements = surviving_blade_objects
+
                         t_fracture += (time.perf_counter() - start_time)
 
                     # --- FIN DE LA BOUCLE INTERNE ---
@@ -499,6 +537,7 @@ async def simulation_stream(websocket: WebSocket):
                     current_time = frame_id * temps_visuel_par_frame
 
                     # 9. Calcul vectorisé de Von Mises (Heat Map)
+                    #print("9. Calcul vectorisé de Von Mises (Heat Map)")
                     if M_blade is not None:
                         sig_x = sigma_blade[:, 0]
                         sig_y = sigma_blade[:, 1]
@@ -510,12 +549,13 @@ async def simulation_stream(websocket: WebSocket):
                         stresses = []
 
                     # --- ÉCRITURE DES DONNÉES DE DIAGNOSTIC ---
+                    #print(" --- ÉCRITURE DES DONNÉES DE DIAGNOSTIC ---")
                     max_u = float(np.max(np.abs(u_blade)))
                     max_f_ext = float(np.max(np.abs(F_ext)))
                     max_f_int = float(np.max(np.abs(F_int)))
                     max_stress = float(max(stresses)) if stresses else 0.0
                     max_u_o = float(np.max(np.abs(u_obs))) if len(u_obs) > 0 else 0.0
-
+                        
                     # enregistrement csv
                     with open(log_filename, "a") as f:
                         f.write(f"{frame_id},{current_time:.6f},{max_u:.5e},{max_f_ext:.5e},{max_f_int:.5e},{max_stress:.5e},{max_u_o:.5e}\n")
@@ -543,7 +583,7 @@ async def simulation_stream(websocket: WebSocket):
                     await websocket.send_text(json.dumps(frame_payload))
                     await asyncio.sleep(0.05)
                 
-            print("[Solveur] Simulation terminée. En attente d'une nouvelle requête...\n")
+            #print("[Solveur] Simulation terminée. En attente d'une nouvelle requête...\n")
 
     except WebSocketDisconnect:
         # L'utilisateur a fermé la page ou rechargé le navigateur

@@ -45,7 +45,7 @@ class ElementCST:
         ])
 
         # 4. Matrice matérielle D
-        mat = MATERIALS.get(material_name, MATERIALS["steel"])
+        mat = MATERIALS.get(material_name, MATERIALS["steel"]) 
         D = ElementCST.get_D_matrix(mat["E"], mat["nu"])
 
         # 5. Calcul de la masse locale (en kg)
@@ -92,7 +92,6 @@ class SystemAssembler:
     @staticmethod
     def precompute_system(nodes_dict_list, elements, scale_factor=0.001):
         """
-        Remplace l'ancienne fonction assemble().
         Retourne une liste contenant les propriétés pré-calculées de chaque élément,
         ainsi que le vecteur de masse globale M.
         """
@@ -128,7 +127,8 @@ class SystemAssembler:
                 'B': props['B'],
                 'D': props['D'],
                 'A': props['A'],
-                't': props['t']
+                't': props['t'],
+                'material': mat_name
             })
             
             # Assemblage dynamique du vecteur de masse modale

@@ -290,7 +290,7 @@
             22,
             0
           ],
-          "material": "steel"
+          "material": "wood"
         },
         {
           "nodes": [
@@ -306,7 +306,7 @@
             19,
             20
           ],
-          "material": "steel"
+          "material": "wood"
         },
         {
           "nodes": [
@@ -314,7 +314,7 @@
             21,
             0
           ],
-          "material": "steel"
+          "material": "wood"
         },
         {
           "nodes": [
@@ -322,7 +322,7 @@
             3,
             20
           ],
-          "material": "steel"
+          "material": "wood"
         },
         {
           "nodes": [
@@ -330,7 +330,7 @@
             0,
             1
           ],
-          "material": "steel"
+          "material": "wood"
         },
         {
           "nodes": [
@@ -460,7 +460,7 @@
         "y": 174.0961580680237
       },
       "area": 7299.188110683387,
-      "mass": 0.06136763874646825,
+      "mass": 0.016566465040442888,
       "stresses": []
     },
     "kinematics": {
@@ -471,7 +471,8 @@
         "endY": 157.4375
       },
       "impactSpeed": 14
-    }
+    },
+    "fixedNodes": []
   },
   "obstacle": {
     "type": "obstacle",
@@ -556,6 +557,7 @@
       },
       "area": 46996.5,
       "mass": 0.42296849999999997
-    }
+    },
+    "fixedNodes": []
   }
 }
