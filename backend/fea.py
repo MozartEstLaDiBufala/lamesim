@@ -3,6 +3,17 @@ import numpy as np
 from backend.config_p import settings
 
 MATERIALS = settings.get("materials", {})
+print(f"MATERIALS.get('steel').get('E') : {MATERIALS.get('steel').get('E')} (Type: {type(MATERIALS.get('steel').get('E'))})")
+print(f"MATERIALS.get('steel').get('nu') : {MATERIALS.get('steel').get('nu')} (Type: {type(MATERIALS.get('steel').get('nu'))})")
+print(f"MATERIALS.get('steel').get('rho') : {MATERIALS.get('steel').get('rho')} (Type: {type(MATERIALS.get('steel').get('rho'))})")
+print(f"MATERIALS.get('steel').get('sigma_yield') : {MATERIALS.get('steel').get('sigma_yield')} (Type: {type(MATERIALS.get('steel').get('sigma_yield'))})")
+print(f"MATERIALS.get('steel').get('limit_strain') : {MATERIALS.get('steel').get('limit_strain')} (Type: {type(MATERIALS.get('steel').get('limit_strain'))})")
+
+print(f"MATERIALS.get('wood').get('E') : {MATERIALS.get('wood').get('E')} (Type: {type(MATERIALS.get('wood').get('E'))})")
+print(f"MATERIALS.get('wood').get('nu') : {MATERIALS.get('wood').get('E')} (Type: {type(MATERIALS.get('wood').get('E'))})")
+print(f"MATERIALS.get('wood').get('rho') : {MATERIALS.get('wood').get('rho')} (Type: {type(MATERIALS.get('wood').get('rho'))})")
+print(f"MATERIALS.get('wood').get('sigma_uts') : {MATERIALS.get('wood').get('sigma_uts')} (Type: {type(MATERIALS.get('wood').get('sigma_uts'))})")
+print(f"MATERIALS.get('wood').get('limit_strain') : {MATERIALS.get('wood').get('limit_strain')} (Type: {type(MATERIALS.get('wood').get('limit_strain'))})")
 
 class ElementCST:
     """Classe gérant la physique d'un élément triangulaire CST 2D."""

@@ -69,7 +69,7 @@ export async function runSimulation() {
   }
 
   const simulateTimeInput = document.getElementById("input-simulate-time");
-const numStepsInput = document.getElementById("input-num-steps");
+  const numStepsInput = document.getElementById("input-num-steps");
 
   const payload = {
     scale_factor: 0.001, // 1 pixel = 0.001 mètre

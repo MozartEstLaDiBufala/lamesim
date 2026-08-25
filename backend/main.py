@@ -74,12 +74,12 @@ PENALTY_STIFFNESS = float(SOLVER_CONF.get("penalty_stiffness"))
 DAMPING_FACTOR = float(SOLVER_CONF.get("damping_factor"))
 CONTACT_DAMPING = float(SOLVER_CONF.get("contact_damping"))
 
-#print("\n=== VERIFICATION DES VARIABLES GLOBALES ===")
-#print(f"TIME_STEP_PHYSIQUE : {TIME_STEP_PHYSIQUE} (Type: {type(TIME_STEP_PHYSIQUE)})")
-#print(f"PENALTY_STIFFNESS  : {PENALTY_STIFFNESS} (Type: {type(PENALTY_STIFFNESS)})")
-#print(f"DAMPING_FACTOR     : {DAMPING_FACTOR} (Type: {type(DAMPING_FACTOR)})")
-#print(f"CONTACT_DAMPING     : {CONTACT_DAMPING} (Type: {type(CONTACT_DAMPING)})")
-#print("===========================================\n")
+print("\n=== VERIFICATION DES VARIABLES GLOBALES ===")
+print(f"TIME_STEP_PHYSIQUE : {TIME_STEP_PHYSIQUE} (Type: {type(TIME_STEP_PHYSIQUE)})")
+print(f"PENALTY_STIFFNESS  : {PENALTY_STIFFNESS} (Type: {type(PENALTY_STIFFNESS)})")
+print(f"DAMPING_FACTOR     : {DAMPING_FACTOR} (Type: {type(DAMPING_FACTOR)})")
+print(f"CONTACT_DAMPING     : {CONTACT_DAMPING} (Type: {type(CONTACT_DAMPING)})")
+print("===========================================\n")
 
 # --- 2. Le point de terminaison asynchrone (WebSocket) ---
 @app.websocket("/stream")
@@ -103,7 +103,7 @@ async def simulation_stream(websocket: WebSocket):
 
             except ValidationError as e:
                 # Si les structures diffèrent, le code entre ici.
-                ##print("\n=== ÉCHEC DE VALIDATION DU PAYLOAD ===")
+                print("\n=== ÉCHEC DE VALIDATION DU PAYLOAD ===")
                 
                 # Affichage structuré des erreurs exactes
                 for error in e.errors():
@@ -111,10 +111,10 @@ async def simulation_stream(websocket: WebSocket):
                     chemin = " -> ".join([str(loc) for loc in error["loc"]])
                     message = error["msg"]
                     type_erreur = error["type"]
-                    ##print(f"Erreur sur : [{chemin}]")
-                    ##print(f"Raison   : {message} (Type: {type_erreur})\n")
+                    print(f"Erreur sur : [{chemin}]")
+                    print(f"Raison   : {message} (Type: {type_erreur})\n")
                 
-                ##print("=======================================\n")
+                print("=======================================\n")
                 
                 # Optionnel : Renvoyer l'erreur au frontend avant de fermer
                 await websocket.send_json({"error": "Payload invalide", "details": e.errors()})
@@ -128,7 +128,7 @@ async def simulation_stream(websocket: WebSocket):
             impact_speed = payload.blade.kinematics.impactSpeed
             
             if vel is None:
-                ##print("[Attention] Aucune flèche reçue. Chute verticale par défaut.")
+                print("[Attention] Aucune flèche reçue. Chute verticale par défaut.")
                 dir_x = 0.0
                 dir_y = 1.0 # Le vecteur pointe vers le bas
             else:
@@ -146,12 +146,9 @@ async def simulation_stream(websocket: WebSocket):
             ##print(f"PRÉPARATION DE LA DÉTECTION DE COLLISION")
             if payload.parameters:
                 # "simulate_time" correspond à "Durée réelle à simuler"
-                total_simulated_time = payload.parameters.get("simulate_time", 0.05)
+                total_simulated_time = payload.parameters.get("simulate_time")
                 # "num_steps" correspond au "Nombre d'étapes"
-                num_steps = int(payload.parameters.get("num_steps",50))
-            else:
-                total_simulated_time = 0.05
-                num_steps = 50
+                num_steps = int(payload.parameters.get("num_steps"))
 
             # --- 1. CONFIGURATION DU DÉCOUPLAGE TEMPOREL ---
             #print(f"1. CONFIGURATION DU DÉCOUPLAGE TEMPOREL")
@@ -324,7 +321,7 @@ async def simulation_stream(websocket: WebSocket):
                 t_fracture = 0.0
 
                 # 5. Calcul de l'état physique SUIVANT (Ignoré si on est à la dernière frame)
-                #print("5. Calcul de l'état physique SUIVANT (Ignoré si on est à la dernière frame)")
+                #print("5. Calcul de l'état physique SUIVANT)
                 if frame_id < num_steps:
 
                     # --- BOUCLE INTERNE : LA PHYSIQUE PURE ---

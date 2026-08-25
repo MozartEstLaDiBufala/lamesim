@@ -1,6 +1,5 @@
 import math
 
-
 class CollisionDetector:
     def __init__(self, obstacle_nodes, obstacle_elements):
         """

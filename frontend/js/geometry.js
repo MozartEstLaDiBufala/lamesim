@@ -63,7 +63,7 @@ export function rebuildRegionsFromEdges(target) {
 }
 
 // ---Maillage Adaptatif par Bisection (Algorithme de Rivara) ---
-export function refineMeshAdaptive(target, maxEdgeLength = 30) {
+export function refineMeshAdaptive(target, maxEdgeLength = 15) {
   // maxEdgeLength définit la taille maximale tolérée pour une arête (en pixels)
   let needsRefinement = true;
   let iteration = 0;
