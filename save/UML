@@ -1,0 +1,15 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="Page-1" id="rvmBF7F1bTkvr0Jl9qDy">
+    <mxGraphModel dx="1084" dy="1825" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <UserObject label="&#xa;&lt;img src=&quot;https://upload.wikimedia.org/wikipedia/commons/d/df/Restaurant_UML_SEQ.svg?utm_source=fr.wikipedia.org&amp;amp;utm_campaign=index&amp;amp;utm_content=original&quot; alt=&quot;Diagramme de séquence — Wikipédia&quot;&gt;&#xa;&#xa;" link="&#xa;&lt;img src=&quot;https://upload.wikimedia.org/wikipedia/commons/d/df/Restaurant_UML_SEQ.svg?utm_source=fr.wikipedia.org&amp;amp;utm_campaign=index&amp;amp;utm_content=original&quot; alt=&quot;Diagramme de séquence — Wikipédia&quot;&gt;&#xa;&#xa;" id="JE5uJ0I_mPLNu2Ue0Zlm-1">
+          <mxCell parent="1" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1">
+            <mxGeometry height="60" width="120" x="130" y="-210" as="geometry" />
+          </mxCell>
+        </UserObject>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
