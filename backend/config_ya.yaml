@@ -13,6 +13,9 @@ materials:
     rho: 7850.0              # [defaut=7850] Densité (kg/m³)
     sigma_yield: 250.0e+3    # [defaut=250 MPa] Limite élastique (Pascals), point où le matériau casse ou se plie définitivement (solidité).
     limit_strain : 5.0     # [defaut=5] L'acier peut s'étirer plastiquement jusqu'à 500% avant rupture
+    damage_init_ratio: 0.9      # L'acier commence à s'abîmer très tard (90% de sa limite)
+    damage_law: "linear"        # Dégradation progressive et proportionnelle
+    damage_exponent: 1.0        # Non utilisé pour 'linear'
 
   wood: # chêne
     E: 12.0e+8             # [defaut=12 Gpa = 12e+9 Pa]     
@@ -20,6 +23,9 @@ materials:
     rho: 725.0              # [defaut=725] 
     sigma_uts: 40.0e+3     # [defaut=40 MPa]
     limit_strain : 0.15   # [defaut=0.15] Si le bois s'étire de plus de 15% (0.15), ses fibres se déchirent.
+    damage_init_ratio: 0.7      # Le bois commence à craquer plus tôt sous la pression (70%)
+    damage_law: "power"         # Loi de puissance (simule une rupture brutale)
+    damage_exponent: 3.0        # Exposant au cube : la rigidité chute d'un coup juste avant la rupture
 
 
 

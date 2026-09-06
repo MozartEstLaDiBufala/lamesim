@@ -139,7 +139,9 @@ class SystemAssembler:
                 'D': props['D'],
                 'A': props['A'],
                 't': props['t'],
-                'material': mat_name
+                'material': mat_name,
+                'damage': 0.0,                   # L'élément naît intact (0% de dégâts)
+                'D_0': np.copy(props['D'])       # Mémoire de la matrice de rigidité originelle
             })
             
             # Assemblage dynamique du vecteur de masse modale

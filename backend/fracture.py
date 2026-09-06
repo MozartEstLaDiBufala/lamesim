@@ -86,65 +86,73 @@ class FractureManager:
     
     @staticmethod
     def process_erosion_vectorized(elements_data, sigma_tensor, ddls_tensor, B_tensor, D_tensor, vol_tensor):
-        """
-        Supprime les éléments ayant dépassé le seuil critique de pulvérisation,
-        en lisant dynamiquement le matériau de chaque élément.
-        """
-        # PLUS DE PARAMÈTRE material_name GLOBAL
-        
         sig_x = sigma_tensor[:, 0]
         sig_y = sigma_tensor[:, 1]
         tau_xy = sigma_tensor[:, 2]
         
         # --- CALCUL VECTORISÉ GLOBAL ---
-        # On calcule toutes les métriques d'un coup pour profiter de la vitesse de NumPy
-        
-        # Métriques Bois (Contraintes Principales)
         sigma_1 = (sig_x + sig_y) / 2.0 + np.sqrt(((sig_x - sig_y) / 2.0)**2 + tau_xy**2)
         sigma_2 = (sig_x + sig_y) / 2.0 - np.sqrt(((sig_x - sig_y) / 2.0)**2 + tau_xy**2)
         max_stress_wood = np.maximum(np.abs(sigma_1), np.abs(sigma_2))
-        
-        # Métrique Acier (Von Mises)
         von_mises_steel = np.sqrt(sig_x**2 + sig_y**2 - sig_x*sig_y + 3 * tau_xy**2)
         
-        # Masque d'érosion vierge
         eroded_mask = np.zeros(len(elements_data), dtype=bool)
         
-        # --- 1. ÉVALUATION DYNAMIQUE PAR ÉLÉMENT ---
+        # --- 1. LOI D'ÉVOLUTION DE L'ENDOMMAGEMENT ---
         for i, el in enumerate(elements_data):
-            # Lecture du matériau du triangle (acier par défaut)
             mat_name = el.get('material', 'steel')
             mat = MATERIALS.get(mat_name, MATERIALS.get('steel'))
             
-            if mat_name == "wood":
-                # Utilisation d'un get sécurisé avec valeur par défaut pour éviter les crashs si manquant
-                limit_stress = float(mat.get("sigma_uts"))
-                E = float(mat.get("E"))
-                limit_strain = float(mat.get("limit_strain"))
-                
-                max_strain = max_stress_wood[i] / E
-                
-                if max_stress_wood[i] >= limit_stress or max_strain >= limit_strain:
-                    eroded_mask[i] = True
-                    
-            elif mat_name == "steel":
-                limit_stress = float(mat.get("sigma_yield"))
-                E = float(mat.get("E"))
-                limit_strain = float(mat.get("limit_strain"))
-                
-                max_strain = von_mises_steel[i] / E
-                
-                if von_mises_steel[i] >= limit_stress or max_strain >= limit_strain:
-                    eroded_mask[i] = True
+            # Initialisation de sécurité si absente de l'assembleur
+            if 'damage' not in el:
+                el['damage'] = 0.0
+                el['D_0'] = np.copy(D_tensor[i])
 
-        surviving_mask = ~eroded_mask
+            if mat_name == "wood":
+                limit_stress = float(mat.get("sigma_uts"))
+                eq_stress = max_stress_wood[i]
+            else: # steel
+                limit_stress = float(mat.get("sigma_yield"))
+                eq_stress = von_mises_steel[i]
+
+            # --- EXTRACTION DES PARAMÈTRES DE DOMMAGE DEPUIS LE YAML ---
+            init_ratio = float(mat.get("damage_init_ratio", 0.8)) # 80% par défaut
+            law = mat.get("damage_law", "linear")                 # Linéaire par défaut
+            exponent = float(mat.get("damage_exponent", 2.0))     # Exposant par défaut
+
+            initiation_stress = init_ratio * limit_stress
+
+            # Calcul du nouvel endommagement (Modèle d'évolution linéaire)
+            if eq_stress > initiation_stress:
+                # Calcul du dépassement normalisé tau (entre 0.0 et 1.0)
+                tau = (eq_stress - initiation_stress) / (limit_stress - initiation_stress)
+                tau = max(0.0, min(tau, 1.0))
+                
+                # Application de la loi mathématique
+                if law == "power":
+                    calculated_damage = tau ** exponent
+                else: # "linear"
+                    calculated_damage = tau
+                
+                # Thermodynamique : l'endommagement est strictement croissant (irréversible)
+                el['damage'] = max(el['damage'], calculated_damage)
+
+            # Application de la dégradation mécanique sur le tenseur
+            D_tensor[i] = el['D_0'] * (1.0 - el['damage'])
+
+            # Seuil critique géométrique : retrait de la matière
+            if el['damage'] >= 0.95:
+                eroded_mask[i] = True
+
+        surviving_mask = ~eroded_mask #tide : inversion bit a bit True => False
         has_eroded = np.any(eroded_mask)
 
-        # Sortie immédiate si aucune matière n'est détruite
+        # Si aucun élément n'atteint 0.95, on retourne quand même le tenseur D 
+        # car il a pu être dégradé (ramolli) sans être supprimé.
         if not has_eroded:
             return elements_data, ddls_tensor, B_tensor, D_tensor, vol_tensor, False
 
-        # --- 2. FILTRAGE TENSORIEL (Suppression instantanée de la matière) ---
+        # --- 2. FILTRAGE TOPOLOGIQUE (Suppression) ---
         new_elements_data = [el for i, el in enumerate(elements_data) if surviving_mask[i]]
         new_ddls = ddls_tensor[surviving_mask]
         new_B = B_tensor[surviving_mask]

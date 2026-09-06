@@ -253,7 +253,7 @@ async def simulation_stream(websocket: WebSocket):
             # --- INITIALISATION DU FICHIER DE DIAGNOSTIC ---
             log_filename = "diagnostic_physique.csv"
             with open(log_filename, "w") as f:
-                f.write("step,time,max_u_blade,max_F_ext_blade,max_F_int_blade,max_stress,max_u_obs\n")
+                f.write("step,time,max_u_blade,max_F_ext_blade,max_F_int_blade,max_stress,max_u_obs,Blade_Elem,Wood_Elem\n")
 
             # Initialisation des contraintes à vide pour la frame 0
             stresses = [0.0] * len(elements)
@@ -290,7 +290,6 @@ async def simulation_stream(websocket: WebSocket):
                 # 3. Extraction de la connectivité dynamique
                 #print("3. Extraction de la connectivité dynamique")
                 current_blade_elements = [{"nodes": el['nodes'], "material": el.get("material", "steel")} for el in blade_elements_data] if M_blade is not None else []
-                print(current_blade_elements)
                 current_obstacle_elements = [{"nodes": el['nodes'], "material": el.get("material", "wood")} for el in obstacle_elements_data] if M_obstacle is not None else []
 
                 # 4. Construction et ENVOI du payload
@@ -555,7 +554,7 @@ async def simulation_stream(websocket: WebSocket):
                         
                     # enregistrement csv
                     with open(log_filename, "a") as f:
-                        f.write(f"{frame_id},{current_time:.6f},{max_u:.5e},{max_f_ext:.5e},{max_f_int:.5e},{max_stress:.5e},{max_u_o:.5e}\n")
+                        f.write(f"{frame_id},{current_time:.6f},{max_u:.5e},{max_f_ext:.5e},{max_f_int:.5e},{max_stress:.5e},{max_u_o:.5e},{len(blade_elements_data)},{len(obstacle_elements_data)}\n") 
 
                     frame_payload = {
                         "step": frame_id+1,
