@@ -1,10 +1,8 @@
-cd C:\Users\1moza\Desktop\Projet\Simu_lame\lamesim #
+cd C:\Users\1moza\Desktop\Projet\Simu_lame\lamesim 
 cd C:\Users\Mozart\Desktop\PC\PROGRAMME\lamesim\lamesim
-.venv\Scripts\activate                                        #
+.venv\Scripts\activate                                        
 uv add fastapi "uvicorn[standard]" pydantic scipy pyyaml
-uv run uvicorn backend.main:app --reload
-uv run python -m uvicorn backend.main:app --reload        #
-
+uv run python -m uvicorn backend.main:app --reload        
 
 
 cd C:\Users\1moza\Desktop\Projet\Simu_lame\lamesim\frontend 
